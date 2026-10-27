@@ -165,3 +165,8 @@ void returnsGenericErrorWithoutExposingExceptionDetails() {
 - **Alcance de ISSUE-01:** solo se implementa la validación de la ubicación y
   contenido de clave al inicio. CORS y disposición de cuentas demo persistidas
   quedan fuera de esta iteración y siguen pendientes en H-AUTH-05/H-AUTH-08.
+- **Límite de verificación de startup:** las pruebas dirigidas invocan el mismo
+  método que observa `StartupEvent` para verificar la clave válida/ausente/
+  inválida; la suite completa confirma arranque Quarkus con clave efímera
+  válida. No se lanzó un proceso Quarkus separado con configuración de clave
+  inválida para observar el fallo del proceso completo.
