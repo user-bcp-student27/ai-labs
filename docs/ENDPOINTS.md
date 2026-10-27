@@ -230,6 +230,9 @@ para errores que el recurso no construye.
   ([`application.properties:14`](../auth/src/main/resources/application.properties#L14),
   [`application.properties:15`](../auth/src/main/resources/application.properties#L15),
   [`application.properties:16`](../auth/src/main/resources/application.properties#L16)).
+  El servicio valida al inicio que la ubicación exista y contenga una clave
+  privada RSA válida para RS256; si falta o no es válida, el arranque falla
+  ([`SigningKeyStartupCheck.java`](../auth/src/main/java/com/bcp/workshop/auth/SigningKeyStartupCheck.java)).
   No se incluye una clave real ni de ejemplo en este documento.
 - Las cuentas demo se crean en dev/test, no en nuevas bases de producción.
   H-AUTH-08 sigue Pendiente porque una base existente puede conservar cuentas

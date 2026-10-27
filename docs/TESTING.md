@@ -30,7 +30,8 @@ Las clases completas están en [AuthResourceTest.java](../auth/src/test/java/com
 [AuthResourceUnitTest.java](../auth/src/test/java/com/bcp/workshop/auth/AuthResourceUnitTest.java),
 [HealthEndpointTest.java](../auth/src/test/java/com/bcp/workshop/auth/HealthEndpointTest.java),
 [AuthTestHealthCheck.java](../auth/src/test/java/com/bcp/workshop/auth/AuthTestHealthCheck.java),
-[NoDemoSeedingTest.java](../auth/src/test/java/com/bcp/workshop/auth/NoDemoSeedingTest.java)
+[NoDemoSeedingTest.java](../auth/src/test/java/com/bcp/workshop/auth/NoDemoSeedingTest.java),
+[SigningKeyStartupCheckTest.java](../auth/src/test/java/com/bcp/workshop/auth/SigningKeyStartupCheckTest.java)
 y [PasswordHasherTest.java](../auth/src/test/java/com/bcp/workshop/auth/PasswordHasherTest.java).
 
 ### Health
@@ -141,6 +142,9 @@ void returnsGenericErrorWithoutExposingExceptionDetails() {
 | auth | H-AUTH-02–H-AUTH-08 | `mvn verify` (con `AUTH_DB_URL` apuntando a SQLite temporal y clave RSA efímera generada por `AuthJwtTestResource`) | `auth/` | 0 | 22 pruebas; 0 fallas, 0 errores. JaCoCo por líneas: `LegacyDatabase` 89.2%, `PasswordHasher` 92.9%, `AuthResource`, `AuthService` y `TokenService` 100%. |
 | auth | H-AUTH-08 | `mvn -Dtest=NoDemoSeedingTest test` | `auth/` | 0 | 1 prueba; seeding deshabilitado no crea las cuentas demo en la base temporal vacía. |
 | auth | H-AUTH-08 | `mvn -Dtest=NoDemoSeedingTest test` (antes de corregir el seeding) | `auth/` | 1 | Falló como se esperaba: encontró dos cuentas demo con `auth.seed-demo-users=false`. |
+| auth | H-AUTH-03, H-AUTH-05 | `mvn -Dtest=SigningKeyStartupCheckTest test` | `auth/` | 0 | 3 pruebas: acepta clave RSA privada válida; rechaza ubicación ausente/vacía y archivos ausentes/inválidos. |
+| auth | H-AUTH-03, H-AUTH-05 | `mvn verify` (baseline previo) | `auth/` | 0 | 22 pruebas, 0 fallas, 0 errores; SQLite temporal y clave efímera de prueba. |
+| auth | H-AUTH-03, H-AUTH-05 | `mvn verify` (regresión posterior) | `auth/` | 0 | 25 pruebas, 0 fallas, 0 errores; JaCoCo: `SigningKeyStartupCheck` 100% de líneas. |
 
 ## Fallos corregidos, pendientes y no ejecutados
 
@@ -158,3 +162,11 @@ void returnsGenericErrorWithoutExposingExceptionDetails() {
   aprobado cómo distinguirlas de cuentas legítimas.
 - **No ejecutado:** CodeQL y Dependency Review remotos, conforme a la
   restricción del recorrido.
+- **Alcance de ISSUE-01:** solo se implementa la validación de la ubicación y
+  contenido de clave al inicio. CORS y disposición de cuentas demo persistidas
+  quedan fuera de esta iteración y siguen pendientes en H-AUTH-05/H-AUTH-08.
+- **Límite de verificación de startup:** las pruebas dirigidas invocan el mismo
+  método que observa `StartupEvent` para verificar la clave válida/ausente/
+  inválida; la suite completa confirma arranque Quarkus con clave efímera
+  válida. No se lanzó un proceso Quarkus separado con configuración de clave
+  inválida para observar el fallo del proceso completo.

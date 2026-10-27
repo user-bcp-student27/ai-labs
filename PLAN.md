@@ -326,3 +326,28 @@ de este follow-up.
 El solicitante confirmó que no se modifiquen cuentas existentes y que
 H-AUTH-08 permanezca `Pendiente` hasta una decisión segura sobre su
 identificación.
+
+## Alcance autorizado de ISSUE-01 / HU-01 — 2026-10-27
+
+- Referencias indicadas por el solicitante: issue `ISSUE-01`, spec `HU-01`,
+  arquitectura `SR Arch`. No se proporcionó identidad del aprobador ni un
+  número de issue de GitHub coincidente.
+- Alcance implementable de esta iteración: validar al iniciar que la ubicación
+  configurada para la clave de firma existe, contiene una clave privada RSA
+  válida para RS256 y es legible.
+- Comportamiento aprobado: si la ubicación falta o la clave no es válida, el
+  inicio del servicio falla.
+- CORS se excluye de esta iteración; se mantiene abierto y H-AUTH-05 sigue
+  `Pendiente`.
+- La clasificación o modificación de cuentas demo persistidas se excluye;
+  H-AUTH-08 sigue `Pendiente`.
+- No se modificará el emisor ni el formato JWT. No se añadirán secretos reales
+  ni dependencias.
+
+## Ejecuciones ISSUE-01 — validación de clave al inicio
+
+| fecha | componente | IDs | comando / cwd | propósito | resultado |
+|---|---|---|---|---|---|
+| 2026-10-27 | auth | H-AUTH-03, H-AUTH-05 | `mvn verify` (cwd `auth/`; `AUTH_DB_URL` apuntó a SQLite temporal; test resource generó clave RSA efímera) | Baseline previo: contrato y suite auth existentes. | Aprobado: 22 pruebas, 0 fallas, 0 errores. |
+| 2026-10-27 | auth | H-AUTH-03, H-AUTH-05 | `mvn -Dtest=SigningKeyStartupCheckTest test` (cwd `auth/`) | Validar clave RSA correcta, ubicación ausente/vacía y archivo ausente/inválido invocando el método que observa StartupEvent. | Aprobado: 3 pruebas, 0 fallas, 0 errores. No se lanzó un proceso Quarkus independiente con configuración inválida. |
+| 2026-10-27 | auth | H-AUTH-03, H-AUTH-05 | `mvn verify` (cwd `auth/`; `AUTH_DB_URL` apuntó a SQLite temporal; test resource generó clave RSA efímera) | Regresión completa; el runtime Quarkus de las pruebas inicia con una clave válida y el check de startup se ejecuta. | Aprobado: 25 pruebas, 0 fallas, 0 errores. JaCoCo: `SigningKeyStartupCheck` 100% de líneas; mínimo del código modificado 100%. |
