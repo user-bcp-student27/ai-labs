@@ -101,3 +101,45 @@ En el paso de documentación/testing se añadieron checks de `GET /q/health`,
 body malformado y media type de `POST /auth/login`. `mvn verify` con cwd
 `auth/` terminó con 22 pruebas aprobadas, 0 fallas y 0 errores; la cobertura de
 líneas de `LegacyDatabase` fue 89.2% y la de `PasswordHasher` 92.9%.
+
+## Discovery auth — candidatos para revisión humana (2026-10-27)
+
+Los siguientes candidatos revalidan IDs existentes. `CANDIDATO` es un estado
+provisional de esta revisión y no representa confirmación humana ni cambia la
+historia de estados de la matriz anterior. No se modificó código ni se
+ejecutaron pruebas en este discovery.
+
+### H-AUTH-08 — Cuentas demo existentes podrían seguir autenticándose
+- Estado: CANDIDATO
+- Evidencia: `auth/src/main/java/com/bcp/workshop/auth/LegacyDatabase.java:32-41,58-68,86-101`; `auth/src/main/java/com/bcp/workshop/auth/AuthService.java:20-22`; `auth/src/main/resources/application.properties:13`. El perfil prod deshabilita nuevas seeds, pero la búsqueda no filtra cuentas persistidas por entorno.
+- Impacto: una cuenta demo que ya exista en una base de producción podría superar la verificación de contraseña y recibir un JWT. No se inspeccionó ninguna base de producción.
+- Prioridad propuesta: alta.
+- Contrato potencialmente afectado: `POST /auth/login`; una cuenta demo persistida puede obtener el `200` y el token documentados en `docs/ENDPOINTS.md`.
+- Cómo validarlo: en una SQLite temporal, precrear una cuenta demo y una cuenta legítima, iniciar con seeding deshabilitado y comprobar si la primera puede recibir token y la segunda conserva login. No modificar cuentas reales; acordar primero cómo distinguir demos de usuarios legítimos.
+
+### H-AUTH-05 — CORS acepta orígenes no incluidos en una allowlist
+- Estado: CANDIDATO
+- Evidencia: `auth/src/main/resources/application.properties:4-5` habilita CORS y configura una expresión amplia; `auth/src/test/java/com/bcp/workshop/auth/AuthResourceTest.java:211-225` comprueba que tanto el origen local como uno no listado reciben autorización CORS.
+- Impacto: navegadores de orígenes no aprobados pueden leer respuestas cross-origin cuando el navegador permite la solicitud. El impacto depende de los consumidores y del despliegue; no se inspeccionaron otros componentes.
+- Prioridad propuesta: media.
+- Contrato potencialmente afectado: acceso desde navegador a `POST /auth/login`; no cambia el payload HTTP, pero afecta qué orígenes pueden leer la respuesta.
+- Cómo validarlo: obtener primero la allowlist aprobada y ejecutar preflight para un origen permitido y otro no permitido; verificar la cabecera `Access-Control-Allow-Origin` en ambos casos.
+
+### H-AUTH-04 — Errores distintos de IllegalStateException no tienen respuesta caracterizada
+- Estado: CANDIDATO
+- Evidencia: `auth/src/main/java/com/bcp/workshop/auth/AuthResource.java:52-53` captura solo `IllegalStateException`; el envelope genérico está en `:61-65`. `auth/src/test/java/com/bcp/workshop/auth/AuthResourceUnitTest.java:12-27` solo caracteriza ese tipo.
+- Impacto: otras excepciones no pasan por el manejador explícito; el status y cuerpo resultantes pueden diferir del error genérico documentado. No se comprobó fuga de detalles para esas excepciones.
+- Prioridad propuesta: media.
+- Contrato potencialmente afectado: respuesta `500` de `POST /auth/login` en `docs/ENDPOINTS.md`.
+- Cómo validarlo: inyectar en una prueba una excepción de tipo distinto a `IllegalStateException` desde el Service y comprobar status, cuerpo genérico y ausencia de mensaje interno; registrar el comportamiento actual antes de proponer cambio.
+
+### H-AUTH-06 — Revisión SCA de Quarkus 3.27.4 pendiente
+- Estado: CANDIDATO
+- Evidencia: `auth/pom.xml:13` fija Quarkus 3.27.4; `HALLAZGOS.md:43` registra que no se ejecutó el análisis SCA completo ni CodeQL/Dependency Review remotos.
+- Impacto: no hay evidencia en este discovery para determinar si existen vulnerabilidades aplicables o si se afecta el runtime de los endpoints. No se afirma un CVE.
+- Prioridad propuesta: baja hasta contar con evidencia del análisis.
+- Contrato potencialmente afectado: endpoints del runtime Quarkus, incluidos `/q/health` y `/auth/login`, solo si un advisory aplicable demuestra impacto.
+- Cómo validarlo: ejecutar el análisis de dependencias aprobado para auth, revisar advisories de la versión directa y transitiva, y adjuntar el reporte con versiones afectadas/corregidas. No cambiar versiones ni silenciar findings sin esa evidencia.
+
+Detener discovery aquí para revisión humana de estos cuatro candidatos; no se
+crearon issues automáticamente.
