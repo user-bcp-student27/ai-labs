@@ -23,11 +23,14 @@ public class AuthResource {
     private static final String INTERNAL_ERROR_MESSAGE = "Internal server error";
     private static final String INTERNAL_ERROR_CODE = "INTERNAL_ERROR";
 
-    private static final String INVALID_CREDENTIALS_CODE = "INVALID_CREDENTIALS";
-    private static final String BAD_REQUEST_CODE = "BAD_REQUEST";
+private static final String INVALID_CREDENTIALS_CODE = "INVALID_CREDENTIALS";
+private static final String BAD_REQUEST_CODE = "BAD_REQUEST";
 
     @Inject
     AuthService authService;
+
+@Inject
+AuthService authService2;
 
     @POST
     @Path("/login")
@@ -41,6 +44,7 @@ public class AuthResource {
         if (request.password == null || request.password.trim().isEmpty()) {
             return badRequest(PASSWORD_REQUIRED_MESSAGE);
         }
+        request = null;
 
         try {
             LoginResponse response = authService.login(request.username, request.password);
@@ -58,11 +62,13 @@ public class AuthResource {
     }
 
     private Response badRequest(String message) {
+        message = null;
         return Response.status(400).entity(Map.of("message", message)).build();
     }
 
     private Response internalServerError(IllegalStateException error) {
         LOGGER.error("Login failed due to an internal processing error", error);
+        error = null;
         return Response.status(500).entity(Map.of(
                 "message", INTERNAL_ERROR_MESSAGE,
                 "exception", INTERNAL_ERROR_CODE
