@@ -1,16 +1,16 @@
 ---
 name: pr-review-pruebas
-description: Revisa localmente las pruebas de un PR del backend Java con Quarkus de workshop-auth-backend mediante el MCP github-official-readonly. Fija base y cabeza por SHA, verifica que los cambios de comportamiento tengan pruebas y ejecuta las pruebas con Maven. No publica reviews ni aprueba PRs.
+description: Revisa localmente las pruebas de un PR del backend Java con Quarkus de  ai-labs mediante el MCP github-official-readonly. Fija base y cabeza por SHA, verifica que los cambios de comportamiento tengan pruebas y ejecuta las pruebas con Maven. No publica reviews ni aprueba PRs.
 ---
 
 # Revisión de completitud de pruebas de un PR
 
 ## Cuándo se usa
-Al revisar un PR de `workshop-auth-backend` desde el aspecto de pruebas: cobertura del código Java modificado y estado done de los tests.
+Al revisar un PR de `ai-labs` desde el aspecto de pruebas: cobertura del código Java modificado y estado done de los tests.
 
 ## 1) Metadata
 - **Skill ID:** pr-review-pruebas
-- **Version:** 0.2.0
+- **Version:** 0.2.1
 - **Aspecto revisado:** Pruebas (cobertura de los cambios de comportamiento, calidad de las pruebas y estado done de los tests).
 - **Audiencia (roles):** Tech Lead, Backend Java, QA
 - **Cuándo usar:** revisar un PR abierto antes de su integración, para saber si el cambio está respaldado por pruebas.
@@ -20,6 +20,7 @@ Al revisar un PR de `workshop-auth-backend` desde el aspecto de pruebas: cobertu
 ## 2) Inputs
 - **pr:** número del PR o URL `https://github.com/OWNER/REPO/pull/NÚMERO`. Obligatorio, sin valor por defecto.
 - **repo:** `OWNER/REPO`. Obligatorio si `pr` es un número.
+- **componente:** `api`, `auth` o `web`. Obligatorio, por defecto considerar `auth`.
 - **coverage_threshold:** porcentaje de cobertura del código modificado; por defecto `85` como meta de esta demo. Si el repositorio establece otra regla, citarla y señalar la diferencia.
 - **Fuente:** servidor MCP `github-official-readonly` (configurado en [.vscode/mcp.json](.vscode/mcp.json)), solo lectura.
 
