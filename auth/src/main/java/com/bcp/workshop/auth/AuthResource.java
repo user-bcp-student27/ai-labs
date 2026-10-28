@@ -23,6 +23,9 @@ public class AuthResource {
     private static final String INTERNAL_ERROR_MESSAGE = "Internal server error";
     private static final String INTERNAL_ERROR_CODE = "INTERNAL_ERROR";
 
+    private static final String INVALID_CREDENTIALS_CODE = "INVALID_CREDENTIALS";
+    private static final String BAD_REQUEST_CODE = "BAD_REQUEST";
+
     @Inject
     AuthService authService;
 
