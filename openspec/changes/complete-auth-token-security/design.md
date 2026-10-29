@@ -7,7 +7,7 @@ Ver [proposal.md](proposal.md) para motivación y alcance, y las specs para los 
 - `auth/src/main/resources/application.properties` externaliza `AUTH_TOKEN_SIGNING_KEY_LOCATION` en dev/prod, define RS256 y actualmente permite CORS con `/.*/`.
 - `SigningKeyStartupCheck` impide iniciar si la clave falta, no se puede leer o no es una clave privada válida para RS256. `TokenService` emite `sub`, `role` y `exp`; las pruebas ya verifican firma y claims.
 - `AuthService` autentica contra `AuthRepository` y emite el token tras validar la contraseña. `LegacyDatabase` desactiva el seeding en prod, pero no identifica ni elimina filas demo preexistentes. `NoDemoSeedingTest` comprueba solo que no se creen cuentas nuevas cuando el seeding está desactivado.
-- No se ha aprobado la regla para distinguir cuentas demo persistidas ni la allowlist de producción. Son prerequisitos de decisión, no valores que este diseño pueda inferir.
+- Decisión aprobada por el solicitante (2026-10-29): producción permite el origen exacto `https://www.viabcp.com`; el path `/cas/*` no forma parte del header CORS `Origin`. Las cuentas semilla `student` y `trainer` se bloquean en producción, sin modificar filas; dev/test conserva el comportamiento actual.
 
 ## Goals / Non-Goals
 
@@ -21,7 +21,7 @@ Ver [proposal.md](proposal.md) para motivación y alcance, y las specs para los 
 
 **Non-Goals:**
 
-- Definir o inferir la allowlist, los dominios permitidos o la regla de clasificación de cuentas.
+- Añadir otros orígenes a la allowlist aprobada o intentar restringir CORS por path.
 - Borrar, desactivar o reescribir datos de cuentas existentes.
 - Cambiar endpoints, formato de request/response, expiración o claims JWT, ni modificar `api/` o `web/`.
 - Rediseñar la autenticación o la persistencia completa.
@@ -31,8 +31,8 @@ Ver [proposal.md](proposal.md) para motivación y alcance, y las specs para los 
 - `POST /auth/login` conserva campos requeridos `username` y `password`, `client` opcional y las respuestas documentadas en `docs/ENDPOINTS.md`: `200` al autenticar, `400` para campos inválidos, `401` para credenciales no válidas y `500` para el error interno caracterizado.
 - La respuesta exitosa mantiene `token`, `expiresIn`, `user` y `debug`. El JWT mantiene firma RS256 y claims `sub`, `role` y `exp`.
 - La ruta de clave continúa siendo externa. Si falta o no es válida, el runtime no queda disponible para emitir tokens, conforme al comportamiento actual documentado.
-- La elegibilidad CORS es el único cambio deliberado en el acceso por origen: tras aprobar la allowlist, un origen de producción no incluido no recibe autorización. Métodos, headers y contrato HTTP de login quedan fuera de ese cambio.
-- El rechazo de una cuenta demo identificada no emite token. Para no crear un formato de error nuevo, se reutiliza `401` y la forma existente de respuesta de credenciales inválidas; la regla de identificación debe aprobarse antes de fijar sus datos de prueba.
+- La elegibilidad CORS es el único cambio deliberado en el acceso por origen: producción autoriza solo `https://www.viabcp.com`. El path `/cas/*` no viaja en `Origin` y no se usa como criterio CORS. Métodos, headers y contrato HTTP de login quedan fuera de ese cambio.
+- En producción, `student` y `trainer` no reciben token y obtienen el `401` existente para credenciales inválidas. Dev/test conserva el login de esas cuentas; ninguna fila persistida se modifica.
 
 ## Componentes afectados
 
@@ -51,15 +51,15 @@ Se conserva la configuración externa existente mediante `AUTH_TOKEN_SIGNING_KEY
 
 **Alternativas consideradas:** incluir una clave en el repositorio o generar una automáticamente para mantener el servicio disponible. Se descartan porque exponen material de firma o permiten emitir tokens con una identidad criptográfica inestable. Las pruebas usan claves RSA efímeras en directorios temporales, nunca claves de despliegue.
 
-### Cuentas demo persistidas: decisión bloqueante
+### Cuentas demo persistidas
 
-No se implementa una regla de clasificación hasta recibir aprobación explícita. Una vez aprobada, la elegibilidad se evalúa antes de emitir el JWT; una cuenta identificada como demo recibe el resultado `401` ya utilizado para credenciales no válidas, sin un nuevo payload que revele la causa. No se altera ni elimina ninguna fila persistida.
+La regla aprobada identifica como cuentas demo los usernames exactos `student` y `trainer`, que son los usuarios creados por `LegacyDatabase.seedDefaultUsers`. Solo producción los rechaza, después de verificar las credenciales y antes de emitir el JWT; la respuesta es el `401` existente. Dev/test mantiene el comportamiento actual del taller. El cambio no altera ni elimina filas.
 
-**Alternativas consideradas:** reconocer cuentas por username/password conocidos o por heurísticas sobre sus atributos; se descartan por riesgo de colisión con cuentas legítimas. Borrar o desactivar las cuentas se descarta porque la HU prohíbe esa acción antes de acordar la regla. La regla aprobada es prerequisito de implementación y de los tests que etiqueten una fixture como demo.
+**Riesgo aceptado:** si una cuenta legítima de producción reutiliza exactamente uno de esos usernames, también quedará bloqueada. El control de prueba usa un username distinto para demostrar que las cuentas legítimas no afectadas mantienen el login.
 
 ### CORS de producción
 
-Después de recibir la allowlist aprobada, producción debe autorizar únicamente los orígenes de esa lista. El valor se suministra mediante configuración de despliegue específica del perfil, no mediante dominios inventados ni una lista productiva codificada en tests. Los perfiles de desarrollo y prueba conservan el comportamiento actual salvo que el Issue amplíe expresamente el alcance.
+Producción autoriza solo el origen exacto `https://www.viabcp.com`; los perfiles de desarrollo y prueba conservan `/.*/`. Los navegadores no incluyen el path `/cas/*` en el header `Origin`, por lo que la política no puede distinguir paths de la misma web. No se aplica una restricción de rutas HTTP del API porque no forma parte de este cambio aprobado.
 
 **Alternativas consideradas:** mantener `/.*/`, lo que no resuelve H-AUTH-05; aplicar la restricción globalmente, lo que cambia el flujo local fuera del alcance indicado; o codificar dominios sin aprobación, lo que inventaría una política. Se elige una restricción de producción ligada a la allowlist aprobada.
 
@@ -69,7 +69,7 @@ El cambio no necesita migrar, borrar ni reescribir registros para negar el login
 
 ## Estrategia incremental
 
-1. Registrar las decisiones aprobadas sobre identificación de cuentas demo y allowlist CORS antes de implementar los escenarios que dependen de ellas. Sin ambas decisiones, no activar esos cambios de comportamiento ni cerrar los hallazgos correspondientes.
+1. Decisiones de identificación de cuentas demo y allowlist CORS registradas el 2026-10-29; usar únicamente los usernames y el origen enumerados en este diseño.
 2. Añadir o conservar pruebas de caracterización y ejecutarlas en `auth/` antes de cambiar el comportamiento. Mantener el contrato de login y de firma como control de regresión.
 3. Implementar cada política solo con sus datos aprobados, de forma aislada y revisable; no mezclar la decisión de cuentas con la de orígenes CORS.
 4. Ejecutar `mvn verify` desde `auth/`, revisar JaCoCo para el código modificado y cumplir la meta del componente de al menos 85% de cobertura.
@@ -79,8 +79,8 @@ El cambio no necesita migrar, borrar ni reescribir registros para negar el login
 
 - **Firma y contrato:** conservar `issuesSignedTokenWithIdentityRoleAndExpiration` y los casos de login exitoso de `AuthResourceTest`; deben verificar firma RS256, claims, respuesta `200` y campos del DTO. `SigningKeyStartupCheckTest` ya cubre ubicación faltante, archivo inexistente y contenido inválido con fixtures temporales; mantener esos casos antes de alterar configuración.
 - **Errores HTTP:** conservar los casos de campos requeridos, credenciales inválidas y error interno para detectar cambios accidentales en los códigos o cuerpos documentados.
-- **CORS actual:** `allowsCurrentCorsConfigurationForLocalAndUnlistedOrigins` caracteriza que hoy se autoriza también un origen no listado. Mantener esa evidencia como baseline y reemplazar la expectativa del origen no incluido solo después de aprobar la allowlist; agregar casos de preflight permitido/no permitido con valores de prueba aislados.
-- **Filas preexistentes:** `NoDemoSeedingTest` no cubre el login de cuentas existentes. Una vez aprobada la regla, usar una base temporal precreada con una fixture demo identificada por esa regla y una cuenta legítima de control. Caracterizar primero el login actual de ambas; después, exigir que la demo no obtenga token y que la cuenta legítima conserve `200` y un JWT válido. No usar ni modificar bases reales.
+- **CORS:** `ProductionAuthPolicyTest` caracteriza que producción actualmente permite el origen aprobado y otro no listado; después exige que solo el aprobado reciba `Access-Control-Allow-Origin`.
+- **Filas preexistentes:** `ProductionAuthPolicyTest` usa una SQLite temporal con `student`, `trainer` y `legitimate-control`. Antes del filtro se registró `200` para las tres cuentas; después, producción debe responder `401` para las demos y preservar `200`/JWT para el control. No se usan ni modifican bases reales.
 
 ## Risks / Trade-offs
 

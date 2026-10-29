@@ -2,11 +2,18 @@ package com.bcp.workshop.auth;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.apache.commons.text.StringEscapeUtils;
+
+import java.util.Set;
 
 @ApplicationScoped
 public class AuthService {
     private static final String DEBUG_MESSAGE = "authenticated-with-legacy-flow";
+    private static final Set<String> DEMO_USERNAMES = Set.of("student", "trainer");
+
+    @ConfigProperty(name = "auth.block-demo-users", defaultValue = "false")
+    boolean blockDemoUsers;
 
     @Inject
     AuthRepository repository;
@@ -20,6 +27,9 @@ public class AuthService {
     public LoginResponse login(String username, String password) {
         UserRecord user = repository.findByUsername(username);
         if (user == null || !passwordHasher.verify(password, user.passwordHash())) {
+            return null;
+        }
+        if (blockDemoUsers && DEMO_USERNAMES.contains(user.username())) {
             return null;
         }
 

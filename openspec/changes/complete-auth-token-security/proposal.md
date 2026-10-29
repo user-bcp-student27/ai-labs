@@ -2,15 +2,15 @@
 
 ## Why
 
-El Issue #27 (HU-01) aborda H-AUTH-05 y H-AUTH-08: hoy CORS acepta orígenes no incluidos en una allowlist y cuentas demo preexistentes podrían seguir autenticándose. Resolver ambos riesgos importa para evitar acceso cross-origin no aprobado y emisión de tokens a cuentas demo sin afectar a usuarios legítimos; la allowlist y la regla de identificación todavía requieren aprobación.
+El Issue #27 (HU-01) aborda H-AUTH-05 y H-AUTH-08: hoy CORS acepta orígenes no incluidos en una allowlist y cuentas demo preexistentes podrían seguir autenticándose. El solicitante aprobó `https://www.viabcp.com` como único origen CORS de producción y las cuentas semilla `student` y `trainer` como demos que no deben autenticar en producción.
 
 ## What Changes
 
 **Dentro del alcance**
 
 - Definir comportamiento verificable para la firma del JWT, los claims y la ausencia de emisión cuando falta o no es válida la clave, preservando el comportamiento documentado.
-- Definir el resultado del login para cuentas demo preexistentes una vez aprobada una regla que las distinga de cuentas legítimas.
-- Definir el resultado de preflight para orígenes incluidos y no incluidos una vez aprobada la allowlist de producción.
+- Impedir en producción que las cuentas demo preexistentes `student` y `trainer` obtengan JWT, preservando el login de cuentas legítimas.
+- Permitir preflight de producción únicamente desde el origen exacto `https://www.viabcp.com`.
 - Exigir pruebas observables para los casos anteriores y evidencia para actualizar H-AUTH-05 y H-AUTH-08.
 
 **Comportamiento que debe preservarse**
@@ -18,15 +18,15 @@ El Issue #27 (HU-01) aborda H-AUTH-05 y H-AUTH-08: hoy CORS acepta orígenes no 
 - `POST /auth/login` conserva su request, el formato de respuesta exitosa y el JWT RS256 con claims `sub`, `role` y `exp` descritos en `docs/ENDPOINTS.md`.
 - Se conservan los resultados documentados para campos requeridos inválidos (`400`), credenciales inválidas (`401`) y el error interno caracterizado (`500`). Las cuentas legítimas de control mantienen el login exitoso.
 - La ubicación de la clave sigue siendo externa; la configuración ausente o inválida no debe permitir emitir tokens. La documentación actual describe que el servicio no inicia en esos casos.
-- La elegibilidad de orígenes CORS cambia únicamente cuando exista una allowlist aprobada; no se inventan dominios ni se amplía el alcance a otros componentes.
+- La ruta `/cas/*` no forma parte del origen enviado por el navegador en el header `Origin`; CORS se limita al host aprobado `https://www.viabcp.com`.
 
 **Fuera del alcance**
 
-- Elegir o inventar la allowlist de producción o la regla para identificar cuentas demo.
-- Borrar, desactivar o modificar cuentas persistidas antes de aprobar esa regla.
+- Restringir CORS por path: `/cas/*` es una ruta del cliente y no puede expresarse como origen CORS.
+- Borrar o modificar filas persistidas; el bloqueo ocurre durante el login.
 - Cambiar endpoints, payloads o componentes fuera de `auth/`, o definir ahora el diseño técnico y los pasos de implementación.
 
-Las decisiones pendientes son prerequisitos para completar los escenarios de H-AUTH-05 y H-AUTH-08; esta propuesta no las da por aprobadas.
+La restricción de CORS y el bloqueo de las cuentas semilla se aplican solo al perfil de producción; dev/test conserva el comportamiento actual de las cuentas demo.
 
 ## Capabilities
 

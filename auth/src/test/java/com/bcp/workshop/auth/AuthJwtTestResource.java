@@ -8,6 +8,8 @@ import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.NoSuchAlgorithmException;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.util.Base64;
 import java.util.Map;
 
@@ -24,6 +26,7 @@ public class AuthJwtTestResource implements QuarkusTestResourceLifecycleManager 
     @Override
     public Map<String, String> start() {
         try {
+            DriverManager.registerDriver(new org.sqlite.JDBC());
             keyDirectory = Path.of("target", "auth-jwt-test-keys").toAbsolutePath();
             Files.createDirectories(keyDirectory);
             privateKeyPath = keyDirectory.resolve("private-test-key.pem");
@@ -38,7 +41,7 @@ public class AuthJwtTestResource implements QuarkusTestResourceLifecycleManager 
             return Map.of(
                     "smallrye.jwt.sign.key.location", privateKeyPath.toString(),
                     "auth.test.public-key.location", publicKeyPath.toString());
-        } catch (IOException | NoSuchAlgorithmException error) {
+        } catch (IOException | NoSuchAlgorithmException | SQLException error) {
             throw new IllegalStateException("Unable to create ephemeral JWT test keys", error);
         }
     }
