@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-28
+goal: Definir requisitos verificables para H-AUTH-05 y H-AUTH-08 preservando el
+  contrato documentado de auth

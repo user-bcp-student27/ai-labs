@@ -8,9 +8,9 @@
   Los ejemplos describen el comportamiento actual; no representan una garantía
   de compatibilidad adicional.
 - **Riesgos pendientes:** H-AUTH-04 (errores no `IllegalStateException` sin
-  respuesta caracterizada), H-AUTH-05 (CORS sin allowlist de producción),
-  H-AUTH-06 (revisión SCA incompleta) y H-AUTH-08 (cuentas demo previas que
-  podrían persistir en bases existentes). Ver [HALLAZGOS.md](../HALLAZGOS.md).
+  respuesta caracterizada) y H-AUTH-06 (revisión SCA incompleta). H-AUTH-05 y
+  H-AUTH-08 tienen implementación local verificada; el runtime y los datos de
+  producción no se inspeccionaron. Ver [HALLAZGOS.md](../HALLAZGOS.md).
 
 ## `GET /q/health`
 
@@ -203,7 +203,7 @@ firma con una clave externa y cambia por emisión:
 | `400 Bad Request` | El cuerpo JSON representa `null`. | `{"message":"Request is null"}` |
 | `400 Bad Request` | `username` falta, es nulo o contiene solo espacios. | `{"message":"Username is required"}` |
 | `400 Bad Request` | `password` falta, es nulo o contiene solo espacios. | `{"message":"Password is required"}` |
-| `401 Unauthorized` | El usuario no existe o la contraseña no verifica. El mensaje incluye el `username` recibido, pero no la contraseña. | `{"message":"Invalid user example-user or password"}` |
+| `401 Unauthorized` | El usuario no existe, la contraseña no verifica o el username es `student`/`trainer` en producción. El mensaje incluye el `username` recibido, pero no la contraseña. | `{"message":"Invalid user example-user or password"}` |
 | `500 Internal Server Error` | El Service/Repository lanza `IllegalStateException`, por ejemplo ante un error de consulta SQL. | `{"message":"Internal server error","exception":"INTERNAL_ERROR"}` |
 | `400 Bad Request` | JSON malformado antes de invocar `AuthResource.login`. | El cuerpo lo genera Jackson/Quarkus y no está definido por auth; ver pregunta abierta. |
 | `415 Unsupported Media Type` | El request no usa `Content-Type: application/json`, requerido por `@Consumes`. | El cuerpo lo genera Quarkus y no está definido por auth; ver pregunta abierta. |
@@ -234,13 +234,13 @@ para errores que el recurso no construye.
   privada RSA válida para RS256; si falta o no es válida, el arranque falla
   ([`SigningKeyStartupCheck.java`](../auth/src/main/java/com/bcp/workshop/auth/SigningKeyStartupCheck.java)).
   No se incluye una clave real ni de ejemplo en este documento.
-- Las cuentas demo se crean en dev/test, no en nuevas bases de producción.
-  H-AUTH-08 sigue Pendiente porque una base existente puede conservar cuentas
-  demo de una versión anterior.
-- CORS conserva la expresión amplia `/.*/`; H-AUTH-05 sigue Pendiente hasta
-  acordar la allowlist de producción
-  ([`application.properties:4`](../auth/src/main/resources/application.properties#L4),
-  [`application.properties:5`](../auth/src/main/resources/application.properties#L5)).
+- Las cuentas demo `student` y `trainer` se crean en dev/test. En producción,
+  el login de esos usernames responde `401` incluso si sus filas ya existían;
+  no se borran ni modifican registros. Dev/test conserva el login del taller.
+- En producción CORS autoriza solo el origen `https://www.viabcp.com`; dev/test
+  conserva la configuración amplia actual. El path `/cas/*` no forma parte del
+  header `Origin`, por lo que la política CORS no restringe por path
+  ([`application.properties`](../auth/src/main/resources/application.properties)).
 - Los consumidores externos confirmaron compatibilidad con el formato JWT,
   pero no se inspeccionaron otros componentes; esta documentación describe
   únicamente el contrato observado en auth.
