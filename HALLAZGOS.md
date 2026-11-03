@@ -159,12 +159,12 @@ crearon issues automáticamente.
 `docs/ENDPOINTS.md` existe, pero documenta únicamente auth; no se encontró allí un contrato para api. El siguiente resumen se deriva de `api/app/main.py`; no se modifica ni se crea `docs/ENDPOINTS.md` durante este paso.
 
 - **Observado:** todas las rutas listadas abajo dependen de `legacy_identity`. El encabezado `Authorization` se decodifica como Base64 y se interpreta como `username|role|expiracion|secreto`; se comprueba el secreto literal y la expiración, y cualquier excepción de validación resulta en 401 (`api/app/main.py:14,17-26`). La respuesta de error incluye el texto de la excepción.
-- **Observado:** `GET /api/tasks` devuelve tareas ordenadas por id con `id`, `title`, `description`, `status`, `owner`, `priority` y `createdAt`; `owner` es opcional, con valor predeterminado de la identidad (`api/app/main.py:56-75`).
-- **Observado:** `POST /api/tasks` recibe un objeto JSON; `title` y `description` tienen predeterminado vacío, `status` predeterminado `TODO`, `priority` predeterminado `MEDIUM` y `owner` predeterminado a la identidad. Responde 201 con la tarea creada (`api/app/main.py:77-88`).
-- **Observado:** `GET /api/summary` acepta `owner` opcional y responde `owner`, `total`, `byStatus` y `highPriorityOpen` (`api/app/main.py:90-105`).
-- **Observado:** `POST /api/requirements` recibe un archivo multipart, lo guarda y responde `owner`, `fileName`, `storedAt` y `size` (`api/app/main.py:107-112`).
-- **Observado:** `GET /api/backend-health` consulta `AUTH_HEALTH_URL` o `http://localhost:8080/q/health` y responde `requestedBy`, `status` y `body`; ante excepción devuelve status 0 y su texto (`api/app/main.py:114-121`).
-- **Observado:** SQLite usa `WORKSHOP_DB_PATH` o `./data/workshop.db`, crea la tabla `tasks` y, si está vacía, inserta tres filas iniciales. La conexión se comparte desde el cierre de la aplicación (`api/app/main.py:29-43,123-125`). CORS permite cualquier origen, método y header, junto con credenciales (`api/app/main.py:48-54`).
+- **Observado:** `GET /api/tasks` devuelve tareas ordenadas por id con `id`, `title`, `description`, `status`, `owner`, `priority` y `createdAt`; `owner` es opcional, con valor predeterminado de la identidad (`api/app/main.py:56-65,67-78`).
+- **Observado:** `POST /api/tasks` recibe un objeto JSON; `title` y `description` tienen predeterminado vacío, `status` predeterminado `TODO`, `priority` predeterminado `MEDIUM` y `owner` predeterminado a la identidad. Responde 201 con la tarea creada (`api/app/main.py:80-98`).
+- **Observado:** `GET /api/summary` acepta `owner` opcional y responde `owner`, `total`, `byStatus` y `highPriorityOpen` (`api/app/main.py:100-118`).
+- **Observado:** `POST /api/requirements` recibe un archivo multipart, lo guarda y responde `owner`, `fileName`, `storedAt` y `size` (`api/app/main.py:120-125`).
+- **Observado:** `GET /api/backend-health` consulta `AUTH_HEALTH_URL` o `http://localhost:8080/q/health` y responde `requestedBy`, `status` y `body`; ante excepción devuelve status 0 y su texto (`api/app/main.py:127-134`).
+- **Observado:** SQLite usa `WORKSHOP_DB_PATH` o `./data/workshop.db`, crea la tabla `tasks` y, si está vacía, inserta tres filas iniciales. La conexión se comparte desde el cierre de la aplicación y se cierra en `shutdown` (`api/app/main.py:29-43,136-138`). CORS permite cualquier origen, método y header, junto con credenciales (`api/app/main.py:48-54`).
 - **Acordado:** no consta aprobación humana independiente del contrato de api. Este registro describe el comportamiento observado y no afirma compatibilidad acordada.
 - **Riesgos pendientes:** H-API-02, H-API-03, H-API-05, H-API-06 y H-API-07 siguen sin remediar. H-API-01 requiere análisis de advisories antes de concluir aplicabilidad o cambio de dependencias. H-API-04 quedó resuelto localmente con consultas parametrizadas; las ejecuciones se registran en `PLAN.md`.
 
@@ -175,9 +175,68 @@ Filas de api ordenadas por severidad. La numeración sigue el orden de áreas de
 | id | componente | hallazgo | tipo | explicacion | evidencia (archivo:linea) | severidad | estado |
 |---|---|---|---|---|---|---|---|
 | H-API-02 | api | Token Base64 con secreto embebido y sin firma | Vulnerabilidad | Base64 no garantiza integridad: quien pueda construir el formato con el secreto fijo puede presentar identidad y rol arbitrarios. Se comprueba expiración, pero no firma, emisor ni audiencia; el 401 también incorpora detalles de excepciones. | `api/app/main.py:14,17-26` | alta | Aprobado |
-| H-API-03 | api | El cliente puede consultar y asignar tareas a otro owner | Vulnerabilidad | `GET /api/tasks` y `/api/summary` aceptan un owner enviado por query y lo prefieren a la identidad; `POST /api/tasks` también admite owner en el body. Un usuario con token puede consultar datos de otro propietario o crear registros atribuidos a él. | `api/app/main.py:67-71,77-85,90-93` | alta | Aprobado |
-| H-API-04 | api | Consultas SQLite construidas concatenando entradas | Vulnerabilidad | Los filtros de owner, insert de tareas y recuperación por id usan parámetros enlazados; las pruebas con apóstrofes en query, título y descripción pasan sin alterar la respuesta esperada. | `api/app/main.py:71-74,87-97,103-106`; `api/tests/test_api.py:41-49,54-68,72-90` | alta | Resuelto — SQL parametrizado y 3 pruebas de caracterización aprobadas |
-| H-API-05 | api | Carga de archivos usa directamente el nombre y no limita tamaño ni extensión | Vulnerabilidad | El nombre entregado por el cliente se une al directorio de uploads y se escribe sin normalización; además se lee el archivo completo en memoria. Esto puede permitir escritura fuera del directorio previsto/sobrescritura, o consumo excesivo de disco y memoria. | `api/app/main.py:107-112` | media | Aprobado |
-| H-API-06 | api | Rutas, persistencia, reglas y serialización concentradas en un módulo | Refactor | `create_app` inicializa SQLite y semillas, define el mapeo de filas y declara las rutas que ejecutan SQL y calculan respuestas. Esta concentración dificulta probar y cambiar cada responsabilidad sin efectos colaterales. | `api/app/main.py:29-56,67-125` | baja | Aprobado |
-| H-API-07 | api | Tipado crudo, manejo amplio de excepciones y lógica anidada | Refactor | Requests/responses usan `dict` y `Any`; varios caminos capturan `Exception`, y el cálculo de resumen anida condiciones. La selección de owner y filtros SQL también se repite entre rutas. Esto hace menos explícitos los contratos y complica validar cambios y errores. | `api/app/main.py:8,17-26,56,68,78-79,91,97-104,117-121` | baja | Aprobado |
+| H-API-03 | api | El cliente puede consultar y asignar tareas a otro owner | Vulnerabilidad | `GET /api/tasks` y `/api/summary` aceptan un owner enviado por query y lo prefieren a la identidad; `POST /api/tasks` también admite owner en el body. Un usuario con token puede consultar datos de otro propietario o crear registros atribuidos a él. | `api/app/main.py:68-69,81,86,101-102` | alta | Aprobado |
+| H-API-04 | api | Consultas SQLite construidas concatenando entradas | Vulnerabilidad | Los filtros de owner, insert de tareas y recuperación por id usan parámetros enlazados; las pruebas con apóstrofes en query, título y descripción pasan sin alterar la respuesta esperada. | `api/app/main.py:70-74,87-97,103-106`; `api/tests/test_api.py:41-49,54-68,72-90` | alta | Resuelto — SQL parametrizado y 3 pruebas de caracterización aprobadas |
+| H-API-05 | api | Carga de archivos usa directamente el nombre y no limita tamaño ni extensión | Vulnerabilidad | El nombre entregado por el cliente se une al directorio de uploads y se escribe sin normalización; además se lee el archivo completo en memoria. Esto puede permitir escritura fuera del directorio previsto/sobrescritura, o consumo excesivo de disco y memoria. | `api/app/main.py:120-125` | media | Aprobado |
+| H-API-06 | api | Rutas, persistencia, reglas y serialización concentradas en un módulo | Refactor | `create_app` inicializa SQLite y semillas, define el mapeo de filas y declara las rutas que ejecutan SQL y calculan respuestas. Esta concentración dificulta probar y cambiar cada responsabilidad sin efectos colaterales. | `api/app/main.py:29-65,67-138` | baja | Aprobado |
+| H-API-07 | api | Tipado crudo, manejo amplio de excepciones y lógica anidada | Refactor | Requests/responses usan `dict` y `Any`; varios caminos capturan `Exception`, y el cálculo de resumen anida condiciones. La selección de owner y filtros SQL también se repite entre rutas. Esto hace menos explícitos los contratos y complica validar cambios y errores. | `api/app/main.py:8,17-26,56,68,81,101,107-117,133-134` | baja | Aprobado |
 | H-API-01 | api | Dependencias urllib3 y python-multipart candidatas a revisión SCA | Sugerencia | Las versiones fijadas coinciden con las señaladas en `RETO.md`, pero este discovery no consultó advisories ni confirmó una vulnerabilidad aplicable. Sin ese análisis no corresponde afirmar un CVE ni actualizar dependencias. | `api/requirements.txt:4-5` | baja | Aprobado |
+
+## Discovery web — candidatos para revisión humana (2026-11-03)
+
+`CANDIDATO` es un estado provisional de esta revisión y no representa
+confirmación humana. Alcance: solo `web/`; no se leyó código de auth ni api, y
+`docs/ENDPOINTS.md` solo se usó para el contrato de consumo. No se modificó
+código, no se ejecutaron pruebas ni `npm audit` y no se crearon issues.
+
+Comportamiento observado: `LoginComponent` llama `POST http://localhost:8080/auth/login`
+con `username`, `password` y `client` y guarda token, usuario y preferencias en
+`localStorage` (`web/src/app/login/login.component.ts:41-49`).
+`DashboardComponent` lee esas claves, llama
+`GET http://localhost:8000/api/tasks?owner=<username>` con `Authorization: Bearer`,
+oculta tareas `ARCHIVED`, las ordena por prioridad y las muestra
+(`web/src/app/dashboard/dashboard.component.ts:36-72`). Nginx solo sirve la SPA con
+`try_files` (`web/nginx.conf:7-9`).
+
+### H-WEB-01 — Token y usuario persisten en `localStorage`
+- Estado: CANDIDATO
+- Evidencia: `web/src/app/login/login.component.ts:47-48` guarda `workshop_token` y `workshop_user`; `web/src/app/dashboard/dashboard.component.ts:36-37` los lee y `:75-76` los elimina solo en logout. `web/src/app/app.routes.ts:7-10` no define guard para `/dashboard`. `web/nginx.conf:1-10` no declara cabeceras como CSP.
+- Impacto: cualquier script que se ejecute en el origen de la SPA (XSS o dependencia comprometida) puede leer el token. El token no se borra al expirar ni existe lógica de expiración en el cliente. No se demostró una vía de XSS concreta.
+- Prioridad propuesta: alta.
+- Contrato potencialmente afectado: forma de la respuesta 200 de `POST /auth/login` (`token`, `user`) y claves `workshop_token`/`workshop_user`; header `Authorization: Bearer` hacia `/api/tasks`.
+- Cómo validarlo: prueba con almacenamiento simulado que confirme que tras login el token queda legible en `localStorage`; acordar con el responsable de auth una alternativa acotada al laboratorio (p. ej. almacenamiento en memoria/`sessionStorage` o cookie `HttpOnly`, esta última exige cambios fuera de web) antes de implementar.
+
+### H-WEB-02 — Mensaje dinámico con `[innerHTML]` incorpora entrada del usuario y texto del backend
+- Estado: CANDIDATO
+- Evidencia: `web/src/app/login/login.component.html:39` usa `[innerHTML]="message"`; `web/src/app/login/login.component.ts:56` concatena `this.username` y `backendMessage` dentro de HTML. Los mensajes fijos de `:34,37,52` también son HTML.
+- Impacto: Angular sanea `[innerHTML]`, por lo que no se afirma ejecución de scripts, pero el marcado inyectado por el usuario o por una respuesta del backend se renderiza (p. ej. enlaces, formularios o texto engañoso) y el patrón se rompe si alguien usa `bypassSecurityTrust*`. Es evitable porque el mensaje no necesita HTML.
+- Prioridad propuesta: media.
+- Contrato potencialmente afectado: texto visible de errores de login; no cambia `POST /auth/login`.
+- Cómo validarlo: prueba de componente con usuario como `<b>x</b>` y backend que responda un mensaje con marcado, comprobando el DOM resultante; tras el cambio, verificar que se renderiza como texto y que los mensajes de validación se conservan.
+
+### H-WEB-03 — Dependencias `lodash 4.17.21` y `axios 0.31.0` sin análisis SCA registrado
+- Estado: CANDIDATO
+- Evidencia: `web/package.json:15-16` fija ambas versiones; `web/src/app/login/login.component.ts:5-6,25` usa `axios` y `lodash/merge`, esta última sobre `JSON.parse` de `localStorage` (`:24`); `web/src/app/dashboard/dashboard.component.ts:4,43` usa `axios`. `web/package.json:10` define `audit:workshop` (`npm audit --audit-level=moderate`), cuyo resultado no está registrado.
+- Impacto: no hay evidencia aquí de una vulnerabilidad aplicable; no se afirma ningún CVE. `merge` es el único uso de lodash y fusiona datos controlables desde el navegador, lo que justifica revisarlo.
+- Prioridad propuesta: baja hasta contar con el reporte; sube si un advisory aplica al uso observado.
+- Contrato potencialmente afectado: llamadas HTTP a `/auth/login` y `/api/tasks`; carga de preferencias. Solo si se cambia o elimina una dependencia.
+- Cómo validarlo: desde `web/`, `npm run audit:workshop` y `npm ls lodash axios`; revisar los advisories y si el uso (`merge` de preferencias, `axios.get/post`) está afectado, y adjuntar el reporte. No actualizar ni excluir hallazgos sin esa evidencia.
+
+### H-WEB-04 — Componentes mezclan HTTP, URLs, sesión, navegación y tipado `any`
+- Estado: CANDIDATO
+- Evidencia: URLs fijas `http://localhost:8080/auth/login` (`web/src/app/login/login.component.ts:42`) y `http://localhost:8000/api/tasks` (`web/src/app/dashboard/dashboard.component.ts:43`); `localStorage` y claves repetidas en ambos componentes (`login.component.ts:24,47-49`; `dashboard.component.ts:36-37,75-76`); `: any` en estado y respuestas (`login.component.ts:16-20,41`; `dashboard.component.ts:23-27,43,54`; `web/src/app/utils/legacy-format.ts:1`); `if` anidados en `login.component.ts:33-60`; `owner` se arma por concatenación en la URL (`dashboard.component.ts:43`).
+- Impacto: cambiar un endpoint, clave de sesión o el formato de datos exige editar componentes; no se puede probar la lógica sin HTTP/DOM. La URL fija impide usar otra base en un despliegue distinto de localhost. El `owner` enviado por el cliente se relaciona con el riesgo H-API-03 del componente api; no se verificó aquí su efecto.
+- Prioridad propuesta: media.
+- Contrato potencialmente afectado: `POST /auth/login`, `GET /api/tasks`, claves de sesión y navegación `/login`↔`/dashboard`; deben conservarse al refactorizar.
+- Cómo validarlo: antes de refactorizar, pruebas de caracterización con `axios` y `localStorage` simulados que fijen URL, cuerpo, header y navegación; después comprobar que pasan sin cambios y que no queda `any`/URL/clave literal en los componentes.
+
+### H-WEB-05 — Orden por prioridad comparado como texto y cobertura limitada a una utilidad
+- Estado: CANDIDATO
+- Evidencia: `web/src/app/dashboard/dashboard.component.ts:54` ordena con `a.priority > b.priority ? -1 : 1` sobre cadenas (nunca devuelve 0); `docs/ENDPOINTS.md` documenta valores como `HIGH` y `MEDIUM`. El único spec es `web/src/app/utils/legacy-format.spec.ts:5-7` (un caso) y `web/vitest.config.ts:5` solo incluye `src/**/*.spec.ts` en entorno `node`.
+- Impacto: por orden alfabético descendente `MEDIUM` precede a `LOW` y a `HIGH`, así que las tareas de prioridad alta quedarían al final (por confirmar con datos reales). Sin pruebas de login, dashboard ni reglas de negocio, un cambio de este tipo o un refactor pasaría inadvertido.
+- Prioridad propuesta: media.
+- Contrato potencialmente afectado: orden y filtrado (`ARCHIVED`) de tareas mostradas desde `GET /api/tasks`, y etiquetas de `formatTaskLabel`/`statusLabel`.
+- Cómo validarlo: prueba unitaria con tareas `HIGH`, `MEDIUM`, `LOW` que fije el orden actual y el esperado acordado con producto; `python tools/lab.py test web` (o `npm test` en `web/`) y `npm run test:coverage` para medir cobertura base frente a la meta de 85% del código modificado.
+
+Detener discovery aquí para revisión humana de estos cinco candidatos; no se
+crearon issues automáticamente.
