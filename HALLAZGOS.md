@@ -151,3 +151,33 @@ crearon issues automáticamente.
 - `ProductionAuthPolicyTest` se ejecutó con perfil `prod`, SQLite temporal y clave RSA efímera. Antes del cambio, ambas cuentas demo y `legitimate-control` autenticaron con `200`, y preflight de ViaBCP y de un origen no listado fue autorizado. Después, las cuentas demo respondieron `401`, el control legítimo mantuvo `200`, el origen aprobado fue autorizado y el no listado careció de `Access-Control-Allow-Origin`.
 - `mvn test` y `mvn verify` desde `auth/`: 27 pruebas en siete suites, 0 fallos, 0 errores y 0 omitidas. JaCoCo: `AuthService` 100% de líneas; paquete `auth` 93.5% (174/186 líneas). `git diff --check` pasó.
 - Las filas no se alteraron. No se inspeccionó la base de producción ni se ejecutó el runtime real; queda el riesgo de que un usuario legítimo use exactamente `student` o `trainer`.
+
+## Discovery api (2026-11-02)
+
+### Contrato observado de la API
+
+`docs/ENDPOINTS.md` existe, pero documenta únicamente auth; no se encontró allí un contrato para api. El siguiente resumen se deriva de `api/app/main.py`; no se modifica ni se crea `docs/ENDPOINTS.md` durante este paso.
+
+- **Observado:** todas las rutas listadas abajo dependen de `legacy_identity`. El encabezado `Authorization` se decodifica como Base64 y se interpreta como `username|role|expiracion|secreto`; se comprueba el secreto literal y la expiración, y cualquier excepción de validación resulta en 401 (`api/app/main.py:14,17-26`). La respuesta de error incluye el texto de la excepción.
+- **Observado:** `GET /api/tasks` devuelve tareas ordenadas por id con `id`, `title`, `description`, `status`, `owner`, `priority` y `createdAt`; `owner` es opcional, con valor predeterminado de la identidad (`api/app/main.py:56-75`).
+- **Observado:** `POST /api/tasks` recibe un objeto JSON; `title` y `description` tienen predeterminado vacío, `status` predeterminado `TODO`, `priority` predeterminado `MEDIUM` y `owner` predeterminado a la identidad. Responde 201 con la tarea creada (`api/app/main.py:77-88`).
+- **Observado:** `GET /api/summary` acepta `owner` opcional y responde `owner`, `total`, `byStatus` y `highPriorityOpen` (`api/app/main.py:90-105`).
+- **Observado:** `POST /api/requirements` recibe un archivo multipart, lo guarda y responde `owner`, `fileName`, `storedAt` y `size` (`api/app/main.py:107-112`).
+- **Observado:** `GET /api/backend-health` consulta `AUTH_HEALTH_URL` o `http://localhost:8080/q/health` y responde `requestedBy`, `status` y `body`; ante excepción devuelve status 0 y su texto (`api/app/main.py:114-121`).
+- **Observado:** SQLite usa `WORKSHOP_DB_PATH` o `./data/workshop.db`, crea la tabla `tasks` y, si está vacía, inserta tres filas iniciales. La conexión se comparte desde el cierre de la aplicación (`api/app/main.py:29-43,123-125`). CORS permite cualquier origen, método y header, junto con credenciales (`api/app/main.py:48-54`).
+- **Acordado:** no consta aprobación humana independiente del contrato de api. Este registro describe el comportamiento observado y no afirma compatibilidad acordada.
+- **Riesgos pendientes:** H-API-02, H-API-03, H-API-05, H-API-06 y H-API-07 siguen sin remediar. H-API-01 requiere análisis de advisories antes de concluir aplicabilidad o cambio de dependencias. H-API-04 quedó resuelto localmente con consultas parametrizadas; las ejecuciones se registran en `PLAN.md`.
+
+### Matriz de seguimiento
+
+Filas de api ordenadas por severidad. La numeración sigue el orden de áreas de `RETO.md`; no se encontraron IDs previos de api en este archivo.
+
+| id | componente | hallazgo | tipo | explicacion | evidencia (archivo:linea) | severidad | estado |
+|---|---|---|---|---|---|---|---|
+| H-API-02 | api | Token Base64 con secreto embebido y sin firma | Vulnerabilidad | Base64 no garantiza integridad: quien pueda construir el formato con el secreto fijo puede presentar identidad y rol arbitrarios. Se comprueba expiración, pero no firma, emisor ni audiencia; el 401 también incorpora detalles de excepciones. | `api/app/main.py:14,17-26` | alta | Aprobado |
+| H-API-03 | api | El cliente puede consultar y asignar tareas a otro owner | Vulnerabilidad | `GET /api/tasks` y `/api/summary` aceptan un owner enviado por query y lo prefieren a la identidad; `POST /api/tasks` también admite owner en el body. Un usuario con token puede consultar datos de otro propietario o crear registros atribuidos a él. | `api/app/main.py:67-71,77-85,90-93` | alta | Aprobado |
+| H-API-04 | api | Consultas SQLite construidas concatenando entradas | Vulnerabilidad | Los filtros de owner, insert de tareas y recuperación por id usan parámetros enlazados; las pruebas con apóstrofes en query, título y descripción pasan sin alterar la respuesta esperada. | `api/app/main.py:71-74,87-97,103-106`; `api/tests/test_api.py:41-49,54-68,72-90` | alta | Resuelto — SQL parametrizado y 3 pruebas de caracterización aprobadas |
+| H-API-05 | api | Carga de archivos usa directamente el nombre y no limita tamaño ni extensión | Vulnerabilidad | El nombre entregado por el cliente se une al directorio de uploads y se escribe sin normalización; además se lee el archivo completo en memoria. Esto puede permitir escritura fuera del directorio previsto/sobrescritura, o consumo excesivo de disco y memoria. | `api/app/main.py:107-112` | media | Aprobado |
+| H-API-06 | api | Rutas, persistencia, reglas y serialización concentradas en un módulo | Refactor | `create_app` inicializa SQLite y semillas, define el mapeo de filas y declara las rutas que ejecutan SQL y calculan respuestas. Esta concentración dificulta probar y cambiar cada responsabilidad sin efectos colaterales. | `api/app/main.py:29-56,67-125` | baja | Aprobado |
+| H-API-07 | api | Tipado crudo, manejo amplio de excepciones y lógica anidada | Refactor | Requests/responses usan `dict` y `Any`; varios caminos capturan `Exception`, y el cálculo de resumen anida condiciones. La selección de owner y filtros SQL también se repite entre rutas. Esto hace menos explícitos los contratos y complica validar cambios y errores. | `api/app/main.py:8,17-26,56,68,78-79,91,97-104,117-121` | baja | Aprobado |
+| H-API-01 | api | Dependencias urllib3 y python-multipart candidatas a revisión SCA | Sugerencia | Las versiones fijadas coinciden con las señaladas en `RETO.md`, pero este discovery no consultó advisories ni confirmó una vulnerabilidad aplicable. Sin ese análisis no corresponde afirmar un CVE ni actualizar dependencias. | `api/requirements.txt:4-5` | baja | Aprobado |

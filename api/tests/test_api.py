@@ -38,6 +38,56 @@ def test_creates_task_and_summary(tmp_path: Path) -> None:
     assert summary.json()["total"] == 3
 
 
+def test_lists_tasks_for_owner_containing_quote(tmp_path: Path) -> None:
+    app = create_app(str(tmp_path / "workshop.db"), str(tmp_path / "uploads"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get(
+            "/api/tasks",
+            params={"owner": "stu'dent"},
+            headers=headers(),
+        )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_summarizes_owner_containing_quote(tmp_path: Path) -> None:
+    app = create_app(str(tmp_path / "workshop.db"), str(tmp_path / "uploads"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get(
+            "/api/summary",
+            params={"owner": "stu'dent"},
+            headers=headers(),
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "owner": "stu'dent",
+        "total": 0,
+        "byStatus": {},
+        "highPriorityOpen": 0,
+    }
+
+
+def test_creates_task_with_quotes_in_text_fields(tmp_path: Path) -> None:
+    app = create_app(str(tmp_path / "workshop.db"), str(tmp_path / "uploads"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/api/tasks",
+            headers=headers(),
+            json={
+                "title": "Review owner's requirements",
+                "description": "The user's request is accepted",
+                "status": "TODO",
+                "priority": "MEDIUM",
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json()["title"] == "Review owner's requirements"
+    assert response.json()["description"] == "The user's request is accepted"
+
+
 def test_uploads_requirement(tmp_path: Path) -> None:
     upload_dir = tmp_path / "uploads"
     app = create_app(str(tmp_path / "workshop.db"), str(upload_dir))

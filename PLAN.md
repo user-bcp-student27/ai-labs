@@ -351,3 +351,182 @@ identificación.
 | 2026-10-27 | auth | H-AUTH-03, H-AUTH-05 | `mvn verify` (cwd `auth/`; `AUTH_DB_URL` apuntó a SQLite temporal; test resource generó clave RSA efímera) | Baseline previo: contrato y suite auth existentes. | Aprobado: 22 pruebas, 0 fallas, 0 errores. |
 | 2026-10-27 | auth | H-AUTH-03, H-AUTH-05 | `mvn -Dtest=SigningKeyStartupCheckTest test` (cwd `auth/`) | Validar clave RSA correcta, ubicación ausente/vacía y archivo ausente/inválido invocando el método que observa StartupEvent. | Aprobado: 3 pruebas, 0 fallas, 0 errores. No se lanzó un proceso Quarkus independiente con configuración inválida. |
 | 2026-10-27 | auth | H-AUTH-03, H-AUTH-05 | `mvn verify` (cwd `auth/`; `AUTH_DB_URL` apuntó a SQLite temporal; test resource generó clave RSA efímera) | Regresión completa; el runtime Quarkus de las pruebas inicia con una clave válida y el check de startup se ejecuta. | Aprobado: 25 pruebas, 0 fallas, 0 errores. JaCoCo: `SigningKeyStartupCheck` 100% de líneas; mínimo del código modificado 100%. |
+
+## Plan de api — H-API-01 a H-API-05
+
+Estado: plan aprobado por el solicitante el 2026-11-02. Los cinco IDs existen
+en la matriz de `HALLAZGOS.md` y figuran `Pendiente`. La aprobación no resuelve
+las decisiones externas enumeradas aquí ni registra pruebas ejecutadas o
+cambios de código.
+
+### Impacto y contratos protegidos
+
+`docs/ENDPOINTS.md` existe, pero documenta auth y no define contrato para api.
+Para esta propuesta se protege el comportamiento observado registrado en
+`HALLAZGOS.md`: rutas y métodos `/api/tasks` (GET/POST), `/api/summary` (GET),
+`/api/requirements` (POST) y `Authorization: Bearer ...`; se mantienen los
+códigos de éxito observados (200 para GET y 201 para POST) y las claves de las
+respuestas (`createdAt`, `byStatus`, `highPriorityOpen`, `fileName`, `storedAt`
+y demás campos actuales). Cada caso se caracteriza antes de tocar producción.
+No se amplía el alcance a H-API-06 ni H-API-07.
+
+Hay una incompatibilidad que requiere coordinación antes de implementar
+H-API-02: el formato Base64 sin firma observado no puede conservarse y a la vez
+verificar criptográficamente firma, emisor y audiencia. Se propone conservar
+las rutas, el header bearer y las respuestas de los endpoints, pero migrar el
+formato del token; no se presume aprobación de consumidores externos ni se
+acepta el formato legacy como fallback tras activar la verificación real.
+
+### Orden y validación común
+
+1. Añadir pruebas de caracterización en `api/tests/test_api.py` para las
+   respuestas y datos válidos actuales; ejecutarlas desde `api/` antes de
+   modificar producción y conservar los resultados reales en `docs/TESTING.md`
+   cuando corresponda.
+2. Obtener o ejecutar el análisis SCA aprobado para H-API-01. No afirmar CVEs,
+   actualizar versiones ni añadir excepciones de scanner sin evidencia.
+3. Coordinar con el responsable de los consumidores el cambio de formato de
+   token de H-API-02, sin inspeccionar ni modificar otros componentes.
+4. Parametrizar SQL (H-API-04) y fijar ownership a identidad (H-API-03); después
+   validar en conjunto que rutas, estados y formas de respuesta se mantienen.
+5. Hacer H-API-05 en un incremento separado. Ejecutar regresión API tras cada
+   incremento y mantener el gate existente; la meta de cobertura del código
+   modificado es 85% o superior.
+
+### H-API-01 — Dependencias urllib3 y python-multipart candidatas a revisión SCA
+
+- **Problema:** `api/requirements.txt` fija `urllib3==2.5.0` y
+  `python-multipart==0.0.21`, versiones que `RETO.md` identifica para análisis.
+  No hay evidencia en este discovery que determine advisories aplicables.
+- **Cambio propuesto:** revisar advisories y versiones transitivas con la
+  herramienta aprobada; actualizar a versiones corregidas o retirar una
+  dependencia solo si el reporte y el uso local lo justifican. No cambiar
+  umbrales ni silenciar findings. No agregar dependencias para resolver SCA.
+- **Archivos a tocar:** `api/requirements.txt` solo si el análisis justifica un
+  cambio; `api/tests/test_api.py` para regresión del endpoint multipart si se
+  modifica `python-multipart`. No se identificó un lockfile en el inventario
+  revisado.
+- **Caracterización antes de tocar código/configuración:** registrar las
+  versiones resueltas actuales y ejecutar `pytest` desde `api/`; mantener una
+  prueba de carga multipart válida que compruebe 201, claves de respuesta y
+  bytes guardados. Comparar después la resolución y repetir la suite. El
+  análisis SCA es evidencia externa/de herramientas, no una prueba funcional;
+  su ejecución y resultado quedan pendientes hasta realizarla.
+- **Decisión abierta:** confirmar qué scanner/reporte se usará y evaluar
+  advisories antes de decidir versiones. No se afirma que estas versiones sean
+  vulnerables.
+
+### H-API-02 — Token Base64 con secreto embebido y sin firma
+
+- **Problema:** `legacy_identity` decodifica contenido Base64 y compara un
+  secreto fijo; no verifica firma criptográfica, emisor ni audiencia
+  (`api/app/main.py:14,17-26`).
+- **Cambio propuesto:** verificar un JWT firmado con claims de identidad, rol,
+  emisor, audiencia y expiración. Obtener configuración sensible desde entorno,
+  sin secretos reales en código o fixtures. Usar una biblioteca mantenida y
+  compatible solo después de revisar advisories; justificar y fijar cualquier
+  dependencia nueva en `api/requirements.txt`. Responder 401 genérico ante
+  token ausente, inválido o expirado, sin incluir `str(exception)`. Mantener
+  endpoints, header bearer y cuerpos de éxito de la API.
+- **Archivos a tocar:** `api/app/main.py`, `api/tests/test_api.py` y
+  `api/requirements.txt` únicamente si la biblioteca seleccionada no está ya
+  disponible. No crear configuración con secretos reales.
+- **Caracterización antes de tocar código:** probar los endpoints con token
+  válido emitido por el helper actual y fijar sus status/cuerpos de éxito;
+  registrar 401 para header ausente y token inválido. Tras acordar migración,
+  probar JWT válido, expirado, con firma alterada, emisor incorrecto y
+  audiencia incorrecta; todos los inválidos deben recibir el mismo error
+  genérico. Usar claves efímeras/secretos de prueba aislados.
+- **Dependencia externa y decisión abierta:** acordar con consumidores el
+  emisor, audiencia, algoritmo, claims y despliegue de claves antes de retirar
+  el formato legacy. La compatibilidad binaria del token actual no se puede
+  conservar junto con la garantía de firma real; no hay aprobación registrada.
+
+### H-API-03 — El cliente puede consultar y asignar tareas a otro owner
+
+- **Problema:** las rutas permiten que `owner` de query/body prevalezca sobre
+  `identity["username"]` (`api/app/main.py:67-71,77-85,90-93`).
+- **Cambio propuesto:** derivar siempre el owner de la identidad verificada en
+  la dependencia de autenticación. En GET, conservar el parámetro `owner` por
+  compatibilidad de ruta, pero no usarlo para seleccionar registros; en POST,
+  aceptar el campo por compatibilidad de request si así lo permiten las
+  pruebas, pero ignorarlo y persistir la identidad. Tipar el request/response
+  con modelos Pydantic, manteniendo los campos y nombres JSON observados.
+- **Archivos a tocar:** `api/app/main.py` y `api/tests/test_api.py`.
+- **Caracterización antes de tocar código:** con una base temporal que tenga
+  tareas para student y trainer, registrar que query `owner=trainer` lista y
+  resume actualmente trainer; registrar que crear con `owner=trainer` asigna
+  actualmente esa identidad. Después, verificar que student solo recibe su
+  listado/resumen y que una tarea enviada con owner ajeno se guarda con el
+  username autenticado. Mantener el mismo status, campos de respuesta y
+  comportamiento para requests válidos sin owner.
+- **Dependencia:** H-API-02 debe establecer primero una identidad autenticada y
+  verificada; probar esta política con la identidad verificada, no con claims
+  sin validar.
+
+### H-API-04 — Consultas SQLite construidas concatenando entradas
+
+- **Problema:** filtros e inserts incorporan directamente valores de query y
+  body al SQL (`api/app/main.py:69-71,79-87,92-93`).
+- **Cambio propuesto:** reemplazar la composición de consultas con placeholders
+  SQLite y parámetros enlazados en filtros, inserts y recuperación de la fila
+  creada. Mantener las columnas, orden, valores predeterminados y forma de
+  respuesta observados. No mezclar esta corrección con una reescritura de
+  capas.
+- **Archivos a tocar:** `api/app/main.py` y `api/tests/test_api.py`.
+- **Caracterización antes de tocar código:** comprobar GET/summary de una
+  identidad existente y POST con datos válidos, confirmando 200/201, orden y
+  campos de respuesta. Añadir casos de texto legítimo con comillas en título y
+  descripción; después deben persistir y recuperarse exactamente, sin cambiar
+  el SQL interpretado ni producir error. Usar SQLite temporal.
+- **Dependencia:** cuando H-API-03 esté aplicado, los tests de filtrado deben
+  comprobar además que el owner de SQL es el de identidad, nunca uno enviado
+  por el cliente.
+
+### H-API-05 — Carga de archivos usa directamente el nombre y no limita tamaño ni extensión
+
+- **Problema:** el nombre del cliente se une directamente al directorio,
+  después se lee todo el archivo en memoria y se escribe sin límites
+  (`api/app/main.py:107-112`).
+- **Cambio propuesto:** normalizar el nombre y asegurar que el destino permanezca
+  dentro de `upload_dir`; aplicar allowlist de extensiones y límite de bytes
+  antes de completar la escritura. Procesar la lectura en bloques hasta el
+  límite, eliminando cualquier archivo parcial si la carga se rechaza. Mantener
+  `POST /api/requirements`, status 201 y las claves de respuesta existentes;
+  `fileName` reflejará el nombre normalizado. Usar constantes/configuración con
+  nombre, no límites numéricos dispersos.
+- **Archivos a tocar:** `api/app/main.py` y `api/tests/test_api.py`. Añadir
+  configuración en `api/` solo si se acuerdan valores externos; no introducir
+  variables o políticas no aprobadas.
+- **Caracterización antes de tocar código:** registrar una carga válida de
+  archivo permitido, status 201, claves `owner`, `fileName`, `storedAt` y
+  `size`, y bytes escritos. Después, cubrir nombre normalizado y destino
+  confinado, extensión rechazada, tamaño sobre el límite y limpieza de una
+  escritura parcial; comprobar que una carga válida conserva el comportamiento
+  de respuesta.
+- **Decisiones abiertas:** acordar extensiones permitidas, límite máximo y
+  comportamiento/código HTTP de rechazo antes de implementar; esos valores no
+  están definidos en `docs/GOOD_PRACTICES.md` ni en el contrato observado.
+
+## Decisiones pendientes antes de implementación de api
+
+- Seleccionar herramienta y revisar resultados SCA de H-API-01; no hay
+  aplicabilidad confirmada ni cambio de versión aprobado.
+- Coordinar formato, emisor, audiencia, algoritmo y gestión de claves del JWT
+  con los consumidores de H-API-02; no se ha confirmado aprobación externa.
+- Acordar extensiones y límite máximo de H-API-05, además del status/cuerpo de
+  rechazo, sin modificar las rutas ni las respuestas exitosas observadas.
+- El solicitante aprobó este plan el 2026-11-02. H-API-04 se implementó y sus
+  ejecuciones están registradas abajo. Los demás IDs seleccionados no se
+  implementan en esta iteración: las decisiones externas pendientes deben
+  resolverse antes de abordar los aspectos que dependen de ellas.
+
+### Ejecuciones H-API-04
+
+| fecha | componente | IDs | comando / cwd | propósito | resultado |
+|---|---|---|---|---|---|
+| 2026-11-02 | api | H-API-04 | `python -m pytest` (cwd `api/`, Python global) | Primer intento de baseline antes del setup del componente. | No ejecutado: el intérprete global no tenía `pytest` (`No module named pytest`). |
+| 2026-11-02 | api | H-API-04 | `python -m pytest` (cwd `api/`, `api/.venv`) | Baseline existente antes de añadir caracterización. | Aprobado: 4 pruebas, 0 fallas. |
+| 2026-11-02 | api | H-API-04 | `python -m pytest tests/test_api.py -k quote` (cwd `api/`, `api/.venv`) | Caracterización antes del cambio para owner en list/summary y texto en create. | Falló como se esperaba: 3 pruebas recibieron HTTP 500 frente a 200/201 esperados por entradas legítimas con apóstrofes. |
+| 2026-11-02 | api | H-API-04 | `python -m pytest tests/test_api.py -k quote` (cwd `api/`, `api/.venv`) | Repetición de las mismas caracterizaciones tras parametrizar filtros e insert. | Aprobado: 3 pruebas, 0 fallas. |
+| 2026-11-02 | api | H-API-04 | `python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=85` (cwd `api/`, `api/.venv`) | Regresión completa y gate de cobertura después del cambio. | Aprobado: 7 pruebas, 0 fallas; cobertura de `app/main.py` 91%, total 90.91%, gate de 85% aprobado. 17 warnings de deprecación. |

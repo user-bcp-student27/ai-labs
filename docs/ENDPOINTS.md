@@ -244,3 +244,378 @@ para errores que el recurso no construye.
 - Los consumidores externos confirmaron compatibilidad con el formato JWT,
   pero no se inspeccionaron otros componentes; esta documentación describe
   únicamente el contrato observado en auth.
+
+## Contrato observado de endpoints — api
+
+### Estado del contrato
+
+- **Observado:** las rutas y formas de respuesta siguientes se derivan de
+  `api/app/main.py` y de sus pruebas. Los ejemplos usan el servidor local de
+  `README.md` en `http://localhost:8000`.
+- **Acordado:** no consta una aprobación humana independiente de un contrato
+  API. Esta sección describe el comportamiento actual, no una garantía de
+  compatibilidad adicional.
+- **Riesgos pendientes:** H-API-01 requiere evidencia SCA; H-API-02 aún usa un
+  token Base64 sin firma; H-API-03 permite seleccionar/asignar otro `owner`;
+  H-API-05 no valida nombre, extensión ni tamaño del archivo. H-API-04 tiene
+  consultas parametrizadas. Ver [HALLAZGOS.md](../HALLAZGOS.md).
+
+### Autenticación común
+
+Todas las rutas de api requieren el header exacto `Authorization: Bearer
+<token>`. El token observado es Base64 de cuatro campos separados por `|`:
+`username|role|expiracion|secreto`. El código compara el último campo con un
+secreto fijo y verifica la expiración; no verifica firma, emisor ni audiencia
+([`main.py:14`](../api/app/main.py#L14),
+[`main.py:17`](../api/app/main.py#L17),
+[`main.py:20-26`](../api/app/main.py#L20-L26)). Este formato es solo el flujo
+legacy local observado y no debe usarse como mecanismo de autenticación de
+producción.
+
+Para generar un header válido para los ejemplos locales, PowerShell puede
+crear un token con expiración de una hora. El secreto incluido es un valor
+ficticio ya presente en el código del taller; no usar este ejemplo fuera de
+localhost:
+
+```powershell
+$expiry = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 3600
+$rawToken = "student|STUDENT|$expiry|WORKSHOP_SECRET_2026"
+$token = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($rawToken))
+$headers = @{ Authorization = "Bearer $token" }
+```
+
+Las respuestas de error de autenticación pueden variar en el texto de `detail`
+según el fallo del token, porque el código concatena el texto de la excepción.
+Ejemplo observado para un token que no cumple el formato:
+
+```json
+{"detail":"Invalid token: invalid token"}
+```
+
+## `GET /api/tasks`
+
+### 1. Qué hace
+
+Lista en orden de id las tareas del propietario seleccionado.
+
+### 2. Autenticación y headers
+
+- Requiere `Authorization: Bearer <token>` como se describe en
+  [Autenticación común](#autenticación-común).
+- No requiere body ni `Content-Type`.
+- `Accept: application/json` es opcional.
+
+### 3. Request
+
+| campo/parámetro | tipo | obligatorio | descripción |
+|---|---|---|---|
+| `owner` (query) | string | no | Propietario por el que filtrar. Si se omite o está vacío, se usa el `username` del token. Un valor no vacío enviado por el cliente prevalece sobre la identidad. |
+
+Ejemplo completo, después de definir `$headers` con el bloque de autenticación:
+
+```powershell
+Invoke-RestMethod -Method Get -Uri "http://localhost:8000/api/tasks" -Headers $headers
+```
+
+### 4. Response exitosa
+
+- **Código:** `200 OK`.
+- La respuesta es un array; puede estar vacío.
+
+| campo | tipo | descripción |
+|---|---|---|
+| `id` | integer | Identificador de la tarea en SQLite. |
+| `title` | string | Título. |
+| `description` | string | Descripción. |
+| `status` | string | Estado almacenado. |
+| `owner` | string | Propietario almacenado. |
+| `priority` | string | Prioridad almacenada. |
+| `createdAt` | string | Fecha y hora almacenadas como texto SQLite. |
+
+Ejemplo con las tareas iniciales de la base nueva (los ids y timestamps pueden variar):
+
+```json
+[
+  {"id":1,"title":"Refactor login","description":"Separar responsabilidades en frontend","status":"TODO","owner":"student","priority":"HIGH","createdAt":"2026-11-02 12:00:00"},
+  {"id":2,"title":"Review API","description":"Revisar seguridad de endpoints","status":"IN_PROGRESS","owner":"student","priority":"MEDIUM","createdAt":"2026-11-02 12:00:00"}
+]
+```
+
+### 5. Respuestas de error
+
+| código | cuándo ocurre | ejemplo de cuerpo |
+|---|---|---|
+| `401 Unauthorized` | Header ausente o token inválido/expirado. | `{"detail":"Invalid token: invalid token"}` |
+| `500 Internal Server Error` | Error no manejado al consultar SQLite. FastAPI genera la respuesta genérica. | `{"detail":"Internal Server Error"}` |
+
+### 6. Notas de seguridad
+
+- El token no está firmado ni valida emisor/audiencia; `role` tampoco se usa
+  para autorizar esta consulta.
+- El parámetro `owner` enviado por el cliente puede seleccionar tareas de otro
+  usuario; el valor se parametriza en SQL, pero no queda ligado a la identidad.
+- La consulta usa un parámetro SQLite enlazado
+  ([`main.py:69-74`](../api/app/main.py#L69-L74)).
+
+## `POST /api/tasks`
+
+### 1. Qué hace
+
+Crea una tarea en SQLite y devuelve la fila creada.
+
+### 2. Autenticación y headers
+
+- Requiere `Authorization: Bearer <token>` como se describe en
+  [Autenticación común](#autenticación-común).
+- Requiere `Content-Type: application/json` para enviar el objeto JSON.
+- `Accept: application/json` es opcional.
+
+### 3. Request
+
+El body debe ser un objeto JSON; no hay propiedades obligatorias en el código.
+Los valores se convierten a texto con `str()`.
+
+| campo/parámetro | tipo | obligatorio | descripción |
+|---|---|---|---|
+| `title` | string | no | Título; valor predeterminado `""`. |
+| `description` | string | no | Descripción; valor predeterminado `""`. |
+| `status` | string | no | Estado; valor predeterminado `"TODO"`. |
+| `priority` | string | no | Prioridad; valor predeterminado `"MEDIUM"`. |
+| `owner` | string | no | Propietario; valor predeterminado al `username` del token. Si se envía, el código usa ese valor. |
+
+Ejemplo completo:
+
+```powershell
+$body = @{
+  title = "Add tests"
+  description = "Improve coverage"
+  status = "TODO"
+  priority = "HIGH"
+} | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "http://localhost:8000/api/tasks" -Headers $headers -ContentType "application/json" -Body $body
+```
+
+### 4. Response exitosa
+
+- **Código:** `201 Created`.
+
+| campo | tipo | descripción |
+|---|---|---|
+| `id` | integer | Identificador asignado por SQLite. |
+| `title` | string | Título almacenado. |
+| `description` | string | Descripción almacenada. |
+| `status` | string | Estado almacenado. |
+| `owner` | string | Propietario almacenado. |
+| `priority` | string | Prioridad almacenada. |
+| `createdAt` | string | Fecha y hora almacenadas como texto SQLite. |
+
+Ejemplo (el id y timestamp dependen de la base):
+
+```json
+{"id":4,"title":"Add tests","description":"Improve coverage","status":"TODO","owner":"student","priority":"HIGH","createdAt":"2026-11-02 12:00:00"}
+```
+
+### 5. Respuestas de error
+
+| código | cuándo ocurre | ejemplo de cuerpo |
+|---|---|---|
+| `401 Unauthorized` | Header ausente o token inválido/expirado. | `{"detail":"Invalid token: invalid token"}` |
+| `422 Unprocessable Entity` | Falta el body o el JSON no representa un objeto. FastAPI genera este error de validación. | `{"detail":[{"type":"missing","loc":["body"],"msg":"Field required","input":null}]}` |
+| `500 Internal Server Error` | Error no manejado al insertar o recuperar la tarea desde SQLite. | `{"detail":"Internal Server Error"}` |
+
+### 6. Notas de seguridad
+
+- `owner` del body se acepta y se almacena; no se fuerza al `username` del
+  token. El formato de token tampoco prueba criptográficamente esa identidad.
+- El insert y la recuperación por id usan parámetros enlazados
+  ([`main.py:83-99`](../api/app/main.py#L83-L99)).
+- El body se acepta como diccionario sin modelo Pydantic; los nombres de
+  propiedad desconocidos se ignoran porque la ruta solo lee los cinco campos
+  documentados.
+
+## `GET /api/summary`
+
+### 1. Qué hace
+
+Resume el total y los estados de las tareas del propietario seleccionado, e
+indica las tareas HIGH que no están DONE ni ARCHIVED.
+
+### 2. Autenticación y headers
+
+- Requiere `Authorization: Bearer <token>` como se describe en
+  [Autenticación común](#autenticación-común).
+- No requiere body ni `Content-Type`.
+- `Accept: application/json` es opcional.
+
+### 3. Request
+
+| campo/parámetro | tipo | obligatorio | descripción |
+|---|---|---|---|
+| `owner` (query) | string | no | Propietario por el que resumir. Si se omite o está vacío, se usa el `username` del token. Un valor no vacío enviado por el cliente prevalece sobre la identidad. |
+
+Ejemplo completo, después de definir `$headers`:
+
+```powershell
+Invoke-RestMethod -Method Get -Uri "http://localhost:8000/api/summary" -Headers $headers
+```
+
+### 4. Response exitosa
+
+- **Código:** `200 OK`.
+
+| campo | tipo | descripción |
+|---|---|---|
+| `owner` | string | Propietario resumido. |
+| `total` | integer | Número total de tareas del propietario. |
+| `byStatus` | object | Mapa de estado a cantidad de tareas. |
+| `highPriorityOpen` | integer | Conteo de tareas `HIGH` cuyo estado no es `DONE` ni `ARCHIVED`. |
+
+Ejemplo con la base inicial para `student`:
+
+```json
+{"owner":"student","total":2,"byStatus":{"TODO":1,"IN_PROGRESS":1},"highPriorityOpen":1}
+```
+
+### 5. Respuestas de error
+
+| código | cuándo ocurre | ejemplo de cuerpo |
+|---|---|---|
+| `401 Unauthorized` | Header ausente o token inválido/expirado. | `{"detail":"Invalid token: invalid token"}` |
+| `500 Internal Server Error` | Error no manejado durante la consulta SQLite. | `{"detail":"Internal Server Error"}` |
+
+### 6. Notas de seguridad
+
+- El parámetro `owner` puede pedir el resumen de otro usuario; `role` no se
+  consulta para autorizar la operación.
+- La consulta usa un parámetro SQLite enlazado
+  ([`main.py:101-106`](../api/app/main.py#L101-L106)).
+- El token se decodifica como Base64 sin verificar firma, emisor o audiencia.
+
+## `POST /api/requirements`
+
+### 1. Qué hace
+
+Guarda el archivo de requerimientos recibido en el directorio configurado para
+uploads y devuelve sus metadatos.
+
+### 2. Autenticación y headers
+
+- Requiere `Authorization: Bearer <token>` como se describe en
+  [Autenticación común](#autenticación-común).
+- Requiere un body `multipart/form-data` con la parte `file`.
+- No se debe fijar manualmente el boundary de multipart; el cliente HTTP lo
+  genera.
+
+### 3. Request
+
+| campo/parámetro | tipo | obligatorio | descripción |
+|---|---|---|---|
+| `file` (form-data) | archivo binario | sí | Archivo subido. La ruta no valida extensión ni tamaño. |
+
+Ejemplo completo usando un archivo local `requirements.txt`:
+
+```powershell
+curl.exe -X POST "http://localhost:8000/api/requirements" -H "Authorization: Bearer $token" -F "file=@requirements.txt;type=text/plain"
+```
+
+### 4. Response exitosa
+
+- **Código:** `201 Created`.
+
+| campo | tipo | descripción |
+|---|---|---|
+| `owner` | string | `username` extraído del token. |
+| `fileName` | string o null | Nombre recibido en la parte multipart. |
+| `storedAt` | string | Ruta del destino calculado por el servidor. |
+| `size` | integer | Número de bytes leídos y escritos. |
+
+Ejemplo con el directorio por defecto `./uploads`:
+
+```json
+{"owner":"student","fileName":"requirements.txt","storedAt":"uploads/requirements.txt","size":25}
+```
+
+### 5. Respuestas de error
+
+| código | cuándo ocurre | ejemplo de cuerpo |
+|---|---|---|
+| `401 Unauthorized` | Header ausente o token inválido/expirado. | `{"detail":"Invalid token: invalid token"}` |
+| `422 Unprocessable Entity` | Falta la parte requerida `file`. FastAPI genera este error de validación. | `{"detail":[{"type":"missing","loc":["body","file"],"msg":"Field required"}]}` |
+| `500 Internal Server Error` | Error no manejado al escribir el archivo, por ejemplo si el destino no se puede escribir. | `{"detail":"Internal Server Error"}` |
+
+### 6. Notas de seguridad
+
+- `file.filename` se une directamente al directorio de uploads; el código no
+  normaliza ni confina el destino, no valida extensión y no limita tamaño.
+- El archivo completo se lee en memoria antes de escribirlo
+  ([`main.py:120-125`](../api/app/main.py#L120-L125)). No subir datos sensibles
+  ni archivos grandes al servicio local.
+- La configuración observada es `WORKSHOP_UPLOAD_DIR` o `./uploads`
+  ([`main.py:29-33`](../api/app/main.py#L29-L33)).
+
+## `GET /api/backend-health`
+
+### 1. Qué hace
+
+Consulta el endpoint de salud de auth para exponer el status y body devueltos
+por ese servicio.
+
+### 2. Autenticación y headers
+
+- Requiere `Authorization: Bearer <token>` como se describe en
+  [Autenticación común](#autenticación-común).
+- No requiere body, parámetros query ni `Content-Type`.
+- `Accept: application/json` es opcional.
+
+### 3. Request
+
+| campo/parámetro | tipo | obligatorio | descripción |
+|---|---|---|---|
+| body | ninguno | no | El endpoint no recibe body. |
+| parámetros de query | ninguno | no | La URL del servicio consultado se configura en el servidor, no en la query. |
+
+Ejemplo completo, después de definir `$headers`:
+
+```powershell
+Invoke-RestMethod -Method Get -Uri "http://localhost:8000/api/backend-health" -Headers $headers
+```
+
+### 4. Response exitosa
+
+- **Código:** `200 OK`, incluso si la solicitud al servicio dependiente lanza
+  una excepción que la ruta captura.
+
+| campo | tipo | descripción |
+|---|---|---|
+| `requestedBy` | string | `username` extraído del token. |
+| `status` | integer | Status HTTP del servicio consultado; `0` si la solicitud lanza una excepción. |
+| `body` | string | Body remoto decodificado como UTF-8 o texto de la excepción capturada. |
+
+Ejemplo cuando auth devuelve `200`:
+
+```json
+{"requestedBy":"student","status":200,"body":"{\"status\":\"UP\",\"checks\":[]}"}
+```
+
+### 5. Respuestas de error
+
+| código | cuándo ocurre | ejemplo de cuerpo |
+|---|---|---|
+| `401 Unauthorized` | Header ausente o token inválido/expirado. | `{"detail":"Invalid token: invalid token"}` |
+
+La ruta captura excepciones de conexión/solicitud al backend y en ese caso
+responde `200 OK` con `status: 0`; no se produce una respuesta HTTP de error
+para ese camino. Ejemplo de respuesta exitosa con fallo de conexión:
+
+```json
+{"requestedBy":"student","status":0,"body":"<texto de excepción de urllib3>"}
+```
+
+### 6. Notas de seguridad
+
+- El destino se obtiene de `AUTH_HEALTH_URL`, con valor predeterminado
+  `http://localhost:8080/q/health`; no es controlable por un parámetro de esta
+  ruta ([`main.py:127-133`](../api/app/main.py#L127-L133)).
+- La respuesta puede incluir el texto crudo de una excepción de urllib3 en
+  `body`; el código no lo normaliza.
+- La ruta requiere el mismo token legacy no firmado que los demás endpoints.
