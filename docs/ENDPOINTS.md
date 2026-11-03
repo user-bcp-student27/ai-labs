@@ -254,11 +254,14 @@ para errores que el recurso no construye.
   `README.md` en `http://localhost:8000`.
 - **Acordado:** no consta una aprobación humana independiente de un contrato
   API. Esta sección describe el comportamiento actual, no una garantía de
-  compatibilidad adicional.
+  compatibilidad adicional. Para H-API-05 se aprobaron la allowlist `.txt`, el
+  máximo de 5 MiB, el rechazo de duplicados y los estados de error descritos
+  abajo.
 - **Riesgos pendientes:** H-API-01 requiere evidencia SCA; H-API-02 aún usa un
   token Base64 sin firma; H-API-03 permite seleccionar/asignar otro `owner`;
-  H-API-05 no valida nombre, extensión ni tamaño del archivo. H-API-04 tiene
-  consultas parametrizadas. Ver [HALLAZGOS.md](../HALLAZGOS.md).
+  H-API-05 normaliza y confina nombres, restringe extensión y tamaño, pero no
+  limita el almacenamiento temporal usado por el parsing multipart previo.
+  H-API-04 tiene consultas parametrizadas. Ver [HALLAZGOS.md](../HALLAZGOS.md).
 
 ### Autenticación común
 
@@ -510,7 +513,7 @@ uploads y devuelve sus metadatos.
 
 | campo/parámetro | tipo | obligatorio | descripción |
 |---|---|---|---|
-| `file` (form-data) | archivo binario | sí | Archivo subido. La ruta no valida extensión ni tamaño. |
+| `file` (form-data) | archivo binario | sí | Archivo `.txt`, con máximo de 5 MiB. Los separadores `/` y `\` se normalizan al nombre base. |
 
 Ejemplo completo usando un archivo local `requirements.txt`:
 
@@ -525,9 +528,9 @@ curl.exe -X POST "http://localhost:8000/api/requirements" -H "Authorization: Bea
 | campo | tipo | descripción |
 |---|---|---|
 | `owner` | string | `username` extraído del token. |
-| `fileName` | string o null | Nombre recibido en la parte multipart. |
+| `fileName` | string | Nombre base normalizado de la parte multipart. |
 | `storedAt` | string | Ruta del destino calculado por el servidor. |
-| `size` | integer | Número de bytes leídos y escritos. |
+| `size` | integer | Número de bytes escritos. |
 
 Ejemplo con el directorio por defecto `./uploads`:
 
@@ -540,16 +543,27 @@ Ejemplo con el directorio por defecto `./uploads`:
 | código | cuándo ocurre | ejemplo de cuerpo |
 |---|---|---|
 | `401 Unauthorized` | Header ausente o token inválido/expirado. | `{"detail":"Invalid token: invalid token"}` |
-| `422 Unprocessable Entity` | Falta la parte requerida `file`. FastAPI genera este error de validación. | `{"detail":[{"type":"missing","loc":["body","file"],"msg":"Field required"}]}` |
-| `500 Internal Server Error` | Error no manejado al escribir el archivo, por ejemplo si el destino no se puede escribir. | `{"detail":"Internal Server Error"}` |
+| `400 Bad Request` | Nombre inválido. | `{"detail":"Invalid file name"}` |
+| `400 Bad Request` | Extensión distinta de `.txt`. | `{"detail":"File extension is not allowed"}` |
+| `409 Conflict` | Ya existe un archivo con el nombre normalizado. No se sobrescribe. | `{"detail":"File already exists"}` |
+| `413 Content Too Large` | El archivo excede 5 MiB. | `{"detail":"File exceeds the maximum allowed size"}` |
+| `422 Unprocessable Entity` | Falta la parte requerida `file`; multipart con nombre de archivo vacío también se interpreta como campo ausente. | `{"detail":[{"type":"missing","loc":["body","file"],"msg":"Field required"}]}` |
+| `500 Internal Server Error` | No se puede escribir el archivo. | `{"detail":"Unable to store uploaded file"}` |
+| `500 Internal Server Error` | No se puede eliminar una escritura parcial. | `{"detail":"Unable to remove partial upload"}` |
 
 ### 6. Notas de seguridad
 
-- `file.filename` se une directamente al directorio de uploads; el código no
-  normaliza ni confina el destino, no valida extensión y no limita tamaño.
-- El archivo completo se lee en memoria antes de escribirlo
-  ([`main.py:120-125`](../api/app/main.py#L120-L125)). No subir datos sensibles
-  ni archivos grandes al servicio local.
+- El nombre se normaliza al componente final, se comprueba que el destino siga
+  dentro del directorio de uploads y no se sobrescriben archivos existentes.
+- Solo se acepta `.txt` (sin distinción de mayúsculas) y se escriben como máximo
+  5 MiB en bloques de 64 KiB
+  ([`main.py:17`](../api/app/main.py#L17);
+  [`main.py:20`](../api/app/main.py#L20);
+  [`main.py:21`](../api/app/main.py#L21);
+  [`main.py:183`](../api/app/main.py#L183)).
+- El límite se aplica al archivo procesado por el endpoint; el parsing multipart
+  ocurre antes de la ruta y puede usar almacenamiento temporal. No se afirma
+  aquí un límite de tamaño para ese almacenamiento previo.
 - La configuración observada es `WORKSHOP_UPLOAD_DIR` o `./uploads`
   ([`main.py:29-33`](../api/app/main.py#L29-L33)).
 

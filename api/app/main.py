@@ -8,10 +8,73 @@ from pathlib import Path
 from typing import Any
 
 import urllib3
-from fastapi import Body, Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Header, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 
 LEGACY_SECRET = "WORKSHOP_SECRET_2026"
+BYTES_PER_KIBIBYTE = 1024
+BYTES_PER_MEBIBYTE = BYTES_PER_KIBIBYTE * BYTES_PER_KIBIBYTE
+MAX_REQUIREMENT_FILE_SIZE_MEBIBYTES = 5
+MAX_REQUIREMENT_FILE_SIZE_BYTES = MAX_REQUIREMENT_FILE_SIZE_MEBIBYTES * BYTES_PER_MEBIBYTE
+UPLOAD_READ_CHUNK_SIZE_KIBIBYTES = 64
+UPLOAD_READ_CHUNK_SIZE_BYTES = UPLOAD_READ_CHUNK_SIZE_KIBIBYTES * BYTES_PER_KIBIBYTE
+ALLOWED_REQUIREMENT_FILE_EXTENSIONS = frozenset({".txt"})
+
+
+def normalize_requirement_filename(filename: str | None) -> str:
+    if not filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file name")
+
+    normalized_filename = filename.replace("\\", "/").rsplit("/", 1)[-1]
+    has_drive_prefix = len(normalized_filename) > 1 and normalized_filename[1] == ":" and normalized_filename[0].isalpha()
+    if normalized_filename in {"", ".", ".."} or "\x00" in normalized_filename or has_drive_prefix:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file name")
+
+    return normalized_filename
+
+
+def remove_partial_upload(target: Path) -> None:
+    try:
+        target.unlink(missing_ok=True)
+    except OSError as error:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to remove partial upload",
+        ) from error
+
+
+async def store_requirement_upload(file: UploadFile, target: Path) -> int:
+    written_bytes = 0
+    target_created = False
+    try:
+        with target.open("xb") as destination:
+            target_created = True
+            while content := await file.read(UPLOAD_READ_CHUNK_SIZE_BYTES):
+                if written_bytes + len(content) > MAX_REQUIREMENT_FILE_SIZE_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                        detail="File exceeds the maximum allowed size",
+                    )
+                destination.write(content)
+                written_bytes += len(content)
+    except FileExistsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="File already exists",
+        ) from error
+    except HTTPException:
+        if target_created:
+            remove_partial_upload(target)
+        raise
+    except OSError as error:
+        if target_created:
+            remove_partial_upload(target)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to store uploaded file",
+        ) from error
+
+    return written_bytes
 
 
 def legacy_identity(authorization: str = Header(default="")) -> dict[str, str]:
@@ -117,12 +180,34 @@ def create_app(db_path: str | None = None, upload_dir: str | None = None) -> Fas
                         response["highPriorityOpen"] = response["highPriorityOpen"] + 1
         return response
 
-    @app.post("/api/requirements", status_code=201)
-    async def upload_requirement(file: UploadFile = File(...), identity: dict[str, str] = Depends(legacy_identity)) -> dict[str, Any]:
-        target = Path(selected_uploads) / str(file.filename)
-        content = await file.read()
-        target.write_bytes(content)
-        return {"owner": identity["username"], "fileName": file.filename, "storedAt": str(target), "size": len(content)}
+    @app.post("/api/requirements", status_code=status.HTTP_201_CREATED)
+    async def upload_requirement(
+        file: UploadFile = File(...),
+        identity: dict[str, str] = Depends(legacy_identity),
+    ) -> dict[str, Any]:
+        filename = normalize_requirement_filename(file.filename)
+        if Path(filename).suffix.lower() not in ALLOWED_REQUIREMENT_FILE_EXTENSIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File extension is not allowed",
+            )
+
+        upload_root = Path(selected_uploads).resolve()
+        target = Path(selected_uploads) / filename
+        try:
+            if target.resolve(strict=False).parent != upload_root:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file name")
+        except (OSError, RuntimeError) as error:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file name") from error
+
+        written_bytes = await store_requirement_upload(file, target)
+
+        return {
+            "owner": identity["username"],
+            "fileName": filename,
+            "storedAt": str(target),
+            "size": written_bytes,
+        }
 
     @app.get("/api/backend-health")
     def backend_health(identity: dict[str, str] = Depends(legacy_identity)) -> dict[str, Any]:

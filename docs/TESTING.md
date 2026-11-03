@@ -170,3 +170,28 @@ void returnsGenericErrorWithoutExposingExceptionDetails() {
   inválida; la suite completa confirma arranque Quarkus con clave efímera
   válida. No se lanzó un proceso Quarkus separado con configuración de clave
   inválida para observar el fallo del proceso completo.
+
+## Pruebas de api — H-API-05
+
+| endpoint | caso | resultado esperado |
+|---|---|---|
+| `POST /api/requirements` | `test_uploads_requirement` | 201; respuesta con `owner`, `fileName`, `storedAt` y `size`; bytes conservados. |
+| `POST /api/requirements` | `test_normalizes_upload_filename_and_keeps_destination_inside_upload_dir` | Los separadores POSIX y Windows se normalizan al nombre base y el destino queda en uploads. |
+| `POST /api/requirements` | `test_rejects_upload_with_disallowed_extension` | 400; no se escribe archivo si la extensión no está permitida. |
+| `POST /api/requirements` | `test_rejects_upload_with_invalid_filename` | 400 para nombres inválidos; nombre multipart vacío conserva 422 de campo requerido. |
+| `POST /api/requirements` | `test_rejects_upload_larger_than_limit_without_partial_file` | 413 sobre 5 MiB; no queda archivo parcial. |
+| `POST /api/requirements` | `test_accepts_upload_at_size_limit` | Acepta exactamente 5 MiB y conserva los bytes. |
+| `POST /api/requirements` | `test_rejects_duplicate_upload_without_overwriting_existing_file` | 409; no reemplaza el archivo preexistente. |
+| `POST /api/requirements` | `test_rejects_upload_without_valid_token` | 401; no se escribe archivo. |
+
+### Ejecuciones registradas
+
+| fecha | comando / cwd | resultado |
+|---|---|---|
+| 2026-11-03 | `python tools/lab.py test api` (raíz, baseline) | 7 pruebas aprobadas; cobertura total 90.91%; gate de 85% aprobado. |
+| 2026-11-03 | `python -m pytest tests/test_api.py -k upload -q` (`api/`, `api/.venv`, antes del cambio) | Falló como se esperaba: 5 casos nuevos expusieron la falta de controles; 2 cargas existentes pasaron. |
+| 2026-11-03 | `python tools/lab.py test api` (raíz, regresión posterior) | 14 pruebas aprobadas; cobertura total 86.93%; `app/main.py` 87%; gate de 85% aprobado. |
+
+Comando de regresión desde la raíz: `python tools/lab.py test api`. El límite se
+valida en el endpoint mediante lectura por bloques; el parsing multipart previo
+puede usar almacenamiento temporal y no tiene un límite propio en este cambio.

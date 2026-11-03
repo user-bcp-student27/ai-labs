@@ -495,18 +495,23 @@ acepta el formato legacy como fallback tras activar la verificación real.
   `POST /api/requirements`, status 201 y las claves de respuesta existentes;
   `fileName` reflejará el nombre normalizado. Usar constantes/configuración con
   nombre, no límites numéricos dispersos.
-- **Archivos a tocar:** `api/app/main.py` y `api/tests/test_api.py`. Añadir
-  configuración en `api/` solo si se acuerdan valores externos; no introducir
-  variables o políticas no aprobadas.
+- **Archivos tocados:** `api/app/main.py`, `api/tests/test_api.py`,
+  `docs/ENDPOINTS.md` y `docs/TESTING.md`; evidencia en este `PLAN.md`. No se
+  agregaron variables de entorno ni dependencias.
 - **Caracterización antes de tocar código:** registrar una carga válida de
   archivo permitido, status 201, claves `owner`, `fileName`, `storedAt` y
   `size`, y bytes escritos. Después, cubrir nombre normalizado y destino
   confinado, extensión rechazada, tamaño sobre el límite y limpieza de una
   escritura parcial; comprobar que una carga válida conserva el comportamiento
   de respuesta.
-- **Decisiones abiertas:** acordar extensiones permitidas, límite máximo y
-  comportamiento/código HTTP de rechazo antes de implementar; esos valores no
-  están definidos en `docs/GOOD_PRACTICES.md` ni en el contrato observado.
+- **Decisiones aprobadas para la implementación (2026-11-03):** aceptar solo
+  `.txt` sin distinción de mayúsculas; máximo 5 MiB; normalizar `/` y `\` al
+  nombre base; responder 400 para nombre/extensión inválidos, 413 por exceso
+  de tamaño y 409 para nombre duplicado; no sobrescribir; conservar `storedAt`.
+  La lectura se limita a bloques de 64 KiB y se elimina cualquier escritura
+  parcial. El multipart se procesa antes de la ruta y su almacenamiento
+  temporal no recibe un límite adicional en este incremento. La parte `file`
+  ausente o con nombre vacío conserva el 422 actual de FastAPI.
 
 ## Decisiones pendientes antes de implementación de api
 
@@ -514,12 +519,11 @@ acepta el formato legacy como fallback tras activar la verificación real.
   aplicabilidad confirmada ni cambio de versión aprobado.
 - Coordinar formato, emisor, audiencia, algoritmo y gestión de claves del JWT
   con los consumidores de H-API-02; no se ha confirmado aprobación externa.
-- Acordar extensiones y límite máximo de H-API-05, además del status/cuerpo de
-  rechazo, sin modificar las rutas ni las respuestas exitosas observadas.
-- El solicitante aprobó este plan el 2026-11-02. H-API-04 se implementó y sus
-  ejecuciones están registradas abajo. Los demás IDs seleccionados no se
-  implementan en esta iteración: las decisiones externas pendientes deben
-  resolverse antes de abordar los aspectos que dependen de ellas.
+- El solicitante aprobó este plan el 2026-11-02. H-API-04 y H-API-05 se
+  implementaron localmente y sus ejecuciones están registradas abajo.
+  H-API-01 a H-API-03 quedan fuera de esta iteración; las decisiones externas
+  pendientes deben resolverse antes de abordar los aspectos que dependen de
+  ellas.
 
 ### Ejecuciones H-API-04
 
@@ -530,3 +534,11 @@ acepta el formato legacy como fallback tras activar la verificación real.
 | 2026-11-02 | api | H-API-04 | `python -m pytest tests/test_api.py -k quote` (cwd `api/`, `api/.venv`) | Caracterización antes del cambio para owner en list/summary y texto en create. | Falló como se esperaba: 3 pruebas recibieron HTTP 500 frente a 200/201 esperados por entradas legítimas con apóstrofes. |
 | 2026-11-02 | api | H-API-04 | `python -m pytest tests/test_api.py -k quote` (cwd `api/`, `api/.venv`) | Repetición de las mismas caracterizaciones tras parametrizar filtros e insert. | Aprobado: 3 pruebas, 0 fallas. |
 | 2026-11-02 | api | H-API-04 | `python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=85` (cwd `api/`, `api/.venv`) | Regresión completa y gate de cobertura después del cambio. | Aprobado: 7 pruebas, 0 fallas; cobertura de `app/main.py` 91%, total 90.91%, gate de 85% aprobado. 17 warnings de deprecación. |
+
+### Ejecuciones H-API-05
+
+| fecha | componente | IDs | comando / cwd | propósito | resultado |
+|---|---|---|---|---|---|
+| 2026-11-03 | api | H-API-05 | `python tools/lab.py test api` (raíz) | Baseline previo a cambios. | Aprobado: 7 pruebas, 0 fallas; cobertura total 90.91%; gate de 85% aprobado; 17 warnings de deprecación. |
+| 2026-11-03 | api | H-API-05 | `python -m pytest tests/test_api.py -k upload -q` (`api/`, `api/.venv`) | Caracterización de nombre, extensión, tamaño y colisión antes del cambio. | Falló como se esperaba: 5 casos nuevos expusieron el comportamiento inseguro; 2 cargas existentes pasaron. |
+| 2026-11-03 | api | H-API-05 | `python tools/lab.py test api` (raíz) | Regresión y gate de cobertura después del cambio. | Aprobado: 14 pruebas, 0 fallas; `app/main.py` 87%, cobertura total 86.93%; gate de 85% aprobado; 31 warnings de deprecación. |
