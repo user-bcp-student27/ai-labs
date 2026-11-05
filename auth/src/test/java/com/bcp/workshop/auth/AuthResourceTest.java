@@ -22,11 +22,14 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -208,9 +211,39 @@ class AuthResourceTest {
     }
 
     @Test
+    void rejectsSqlInjectionInUsername() throws Exception {
+        assertLoginRejectedWithoutToken("' OR '1'='1", "fixture-password");
+    }
+
+    @Test
+    void rejectsSqlInjectionInPassword() throws Exception {
+        assertLoginRejectedWithoutToken("student", "' OR '1'='1");
+    }
+
+    @Test
+    void rejectsSqlCommentInjectionInUsername() throws Exception {
+        assertLoginRejectedWithoutToken("student'--", "fixture-password");
+    }
+
+    @Test
     void allowsCurrentCorsConfigurationForLocalAndUnlistedOrigins() {
         assertOriginAllowed("http://localhost:4200");
         assertOriginAllowed("https://unlisted.example");
+    }
+
+    private void assertLoginRejectedWithoutToken(String username, String password) throws Exception {
+        String responseBody = given()
+                .contentType("application/json")
+                .body(JSON_MAPPER.writeValueAsString(
+                        Map.of("username", username, "password", password)))
+                .when().post("/auth/login")
+                .then()
+                .statusCode(401)
+                .body("token", nullValue())
+                .extract()
+                .asString();
+
+        assertFalse(responseBody.contains(password));
     }
 
     private void assertOriginAllowed(String origin) {
